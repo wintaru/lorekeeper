@@ -65,9 +65,11 @@ First run pulls Docker images (~1 GB) and takes a few minutes. Subsequent starts
 Once running, the local stack is available at:
 | Service | URL |
 |---|---|
+| **Studio (DB browser)** | **http://127.0.0.1:54333** |
 | API (use this for `SUPABASE_URL`) | http://127.0.0.1:54331 |
-| Studio (DB browser) | http://127.0.0.1:54333 |
 | Database (direct Postgres) | postgresql://postgres:postgres@127.0.0.1:54332/postgres |
+
+Open Studio to browse tables, run SQL, inspect Realtime events, and manage auth — it's the full Supabase dashboard running locally.
 
 > **Note:** This project runs on offset ports (5433x) because another Supabase project may already be using the default 5432x ports. If you have no other projects running, you can revert the ports in `supabase/config.toml`.
 

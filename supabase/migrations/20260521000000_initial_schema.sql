@@ -41,21 +41,34 @@ create index if not exists characters_campaign_id_idx on characters(campaign_id)
 alter table campaigns  enable row level security;
 alter table characters enable row level security;
 
--- Campaigns are readable by anyone (join by code flow)
-create policy "campaigns_read" on campaigns
+-- Campaigns: readable by anyone (join by code flow)
+create policy "campaigns_select" on campaigns
   for select using (true);
 
--- Only the service role can insert/update campaigns (via API routes)
-create policy "campaigns_write" on campaigns
-  for all using (auth.role() = 'service_role');
+-- Campaigns: only service role can mutate (via API routes)
+-- Split into discrete operations to avoid overlapping permissive policies on SELECT
+create policy "campaigns_insert" on campaigns
+  for insert with check ((select auth.role()) = 'service_role');
 
--- Characters are readable by anyone in the same campaign
-create policy "characters_read" on characters
+create policy "campaigns_update" on campaigns
+  for update using ((select auth.role()) = 'service_role');
+
+create policy "campaigns_delete" on campaigns
+  for delete using ((select auth.role()) = 'service_role');
+
+-- Characters: readable by anyone in the same campaign
+create policy "characters_select" on characters
   for select using (true);
 
--- Characters are writable only via service role
-create policy "characters_write" on characters
-  for all using (auth.role() = 'service_role');
+-- Characters: only service role can mutate
+create policy "characters_insert" on characters
+  for insert with check ((select auth.role()) = 'service_role');
+
+create policy "characters_update" on characters
+  for update using ((select auth.role()) = 'service_role');
+
+create policy "characters_delete" on characters
+  for delete using ((select auth.role()) = 'service_role');
 
 -- ============================================================
 -- Realtime
