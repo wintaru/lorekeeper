@@ -108,6 +108,7 @@ export interface Character {
   characterName: string
   class: string
   level: number
+  xp: number
   maxHp: number
   currentHp: number
   armorClass: number
@@ -117,5 +118,13 @@ export interface Character {
   loot: LootItem[]
   pushSubscription: PushSubscriptionJSON | null
   isActive: boolean
+  createdAt: Date
+}
+
+export interface CustomTable {
+  id: string
+  campaignId: string
+  name: string
+  entries: string[]
   createdAt: Date
 }

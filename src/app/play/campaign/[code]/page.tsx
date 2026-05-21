@@ -5,6 +5,29 @@ import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Character, FateEvent, FateEventType } from '@/types'
 
+const XP_THRESHOLDS = [0,300,900,2700,6500,14000,23000,34000,48000,64000,85000,100000,120000,140000,165000,195000,225000,265000,305000,355000]
+function xpForNextLevel(level: number) { return level >= 20 ? null : XP_THRESHOLDS[level] }
+
+type RollEntry = { label: string; result: number | string; timestamp: Date }
+
+function rollExpression(expr: string): number | string {
+  try {
+    const clean = expr.trim().toLowerCase()
+    const match = clean.match(/^(\d+)d(\d+)([+-]\d+)?$/)
+    if (match) {
+      const count = parseInt(match[1])
+      const sides = parseInt(match[2])
+      const mod = match[3] ? parseInt(match[3]) : 0
+      if (count < 1 || count > 100 || sides < 2 || sides > 1000) return 'Invalid'
+      let total = 0
+      for (let i = 0; i < count; i++) total += Math.floor(Math.random() * sides) + 1
+      return total + mod
+    }
+    if (/^\d+$/.test(clean)) return parseInt(clean)
+    return 'Invalid'
+  } catch { return 'Invalid' }
+}
+
 const EVENT_LABELS: Record<FateEventType, string> = {
   attack:   'Attack',
   curse:    'Curse',
@@ -30,6 +53,8 @@ export default function PlayerCampaignPage() {
   const [pushStatus, setPushStatus] = useState<'idle' | 'subscribed' | 'denied' | 'unsupported'>('idle')
   const [fateToast, setFateToast] = useState<FateEventType | null>(null)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [rollHistory, setRollHistory] = useState<RollEntry[]>([])
+  const [rollExpr, setRollExpr] = useState('')
 
   const loadCharacter = useCallback(async (cid: string) => {
     const characterId = sessionStorage.getItem(`character_${code.toUpperCase()}`)
@@ -185,6 +210,31 @@ export default function PlayerCampaignPage() {
           </div>
         </div>
 
+        {/* XP progress */}
+        {(() => {
+          const nextXp = xpForNextLevel(character.level)
+          const prevXp = XP_THRESHOLDS[character.level - 1] ?? 0
+          const xpPercent = nextXp ? Math.min(100, ((character.xp - prevXp) / (nextXp - prevXp)) * 100) : 100
+          return (
+            <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-stone-400 text-xs uppercase tracking-widest">Experience</span>
+                <span className="text-stone-300 text-sm tabular-nums">
+                  {character.xp.toLocaleString()}{nextXp ? ` / ${nextXp.toLocaleString()}` : ' (max)'}
+                </span>
+              </div>
+              <div className="h-2 bg-stone-800 rounded-full overflow-hidden">
+                <div className="h-full rounded-full bg-violet-500 transition-all duration-500" style={{ width: `${xpPercent}%` }} />
+              </div>
+              {nextXp && (
+                <p className="text-xs text-stone-600 text-right tabular-nums">
+                  {(nextXp - character.xp).toLocaleString()} XP to level {character.level + 1}
+                </p>
+              )}
+            </div>
+          )
+        })()}
+
         {character.conditions.length > 0 && (
           <div className="bg-stone-900 border border-amber-900/50 rounded-xl p-3">
             <p className="text-stone-400 text-xs mb-2">Conditions</p>
@@ -268,6 +318,60 @@ export default function PlayerCampaignPage() {
             ))}
           </div>
         )}
+
+        {/* Dice roller */}
+        <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-3">
+          <p className="text-xs text-stone-500 uppercase tracking-widest">Dice Roller</p>
+          <div className="flex flex-wrap gap-2">
+            {([4,6,8,10,12,20,100] as const).map(d => (
+              <button
+                key={d}
+                onClick={() => {
+                  const result = Math.floor(Math.random() * d) + 1
+                  setRollHistory(h => [{ label: `d${d}`, result, timestamp: new Date() }, ...h].slice(0, 20))
+                }}
+                className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 border border-stone-700 rounded-lg text-sm font-medium transition-colors"
+              >
+                d{d}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={rollExpr}
+              onChange={e => setRollExpr(e.target.value)}
+              onKeyDown={e => {
+                if (e.key !== 'Enter' || !rollExpr.trim()) return
+                const result = rollExpression(rollExpr)
+                setRollHistory(h => [{ label: rollExpr.trim(), result, timestamp: new Date() }, ...h].slice(0, 20))
+                setRollExpr('')
+              }}
+              placeholder="2d6+3"
+              className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-3 py-1.5 text-sm placeholder-stone-600 focus:outline-none focus:border-amber-600"
+            />
+            <button
+              onClick={() => {
+                if (!rollExpr.trim()) return
+                const result = rollExpression(rollExpr)
+                setRollHistory(h => [{ label: rollExpr.trim(), result, timestamp: new Date() }, ...h].slice(0, 20))
+                setRollExpr('')
+              }}
+              className="px-3 py-1.5 bg-amber-700 hover:bg-amber-600 rounded-lg text-sm font-medium transition-colors"
+            >
+              Roll
+            </button>
+          </div>
+          {rollHistory.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {rollHistory.map((r, i) => (
+                <div key={i} className="flex items-center justify-between text-sm">
+                  <span className="text-stone-400">{r.label}</span>
+                  <span className="font-bold text-amber-300 tabular-nums">{r.result}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </main>
   )
@@ -362,6 +466,7 @@ function rowToCharacter(row: Record<string, unknown>): Character {
     characterName: row.character_name as string,
     class: row.class as string,
     level: row.level as number,
+    xp: (row.xp as number) ?? 0,
     maxHp: row.max_hp as number,
     currentHp: row.current_hp as number,
     armorClass: row.armor_class as number,

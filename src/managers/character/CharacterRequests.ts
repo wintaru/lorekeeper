@@ -28,3 +28,17 @@ export class UpdateSpellSlotsRequest extends RequestBase {
     public readonly spellSlots: SpellSlot[],
   ) { super() }
 }
+
+export class AwardXpRequest extends RequestBase {
+  constructor(
+    public readonly characterId: string,
+    public readonly xpToAdd: number,
+  ) { super() }
+}
+
+export class WhisperRequest extends RequestBase {
+  constructor(
+    public readonly characterId: string,
+    public readonly message: string,
+  ) { super() }
+}

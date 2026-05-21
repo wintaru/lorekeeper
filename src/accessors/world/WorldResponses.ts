@@ -1,5 +1,5 @@
 import { ResponseBase } from '@/common/ResponseBase'
-import type { Npc, Location, SessionNote, InventoryItem } from '@/types'
+import type { Npc, Location, SessionNote, InventoryItem, CustomTable } from '@/types'
 
 export class StoreNpcResponse extends ResponseBase {
   readonly correlationId: string
@@ -161,6 +161,49 @@ export class LoadCampaignInventoryResponse extends ResponseBase {
 }
 
 export class UpdateCharacterLootResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+
+  constructor(correlationId: string, success: boolean, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.success = success
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class StoreCustomTableResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+  readonly table: CustomTable | null
+
+  constructor(correlationId: string, table: CustomTable | null, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.table = table
+    this.success = table !== null
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class LoadCustomTablesResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+  readonly tables: CustomTable[]
+
+  constructor(correlationId: string, tables: CustomTable[], errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.tables = tables
+    this.success = errorMessage === undefined
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class RemoveCustomTableResponse extends ResponseBase {
   readonly correlationId: string
   readonly success: boolean
   readonly errorMessage: string | null

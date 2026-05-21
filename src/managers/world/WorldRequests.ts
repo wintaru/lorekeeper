@@ -90,3 +90,27 @@ export class UpdateCharacterLootRequest extends RequestBase {
     public readonly loot: LootItem[],
   ) { super() }
 }
+
+export class AddCustomTableRequest extends RequestBase {
+  constructor(
+    public readonly campaignId: string,
+    public readonly name: string,
+    public readonly entries: string[],
+  ) { super() }
+}
+
+export class EditCustomTableRequest extends RequestBase {
+  constructor(
+    public readonly tableId: string,
+    public readonly name: string,
+    public readonly entries: string[],
+  ) { super() }
+}
+
+export class DeleteCustomTableRequest extends RequestBase {
+  constructor(public readonly tableId: string) { super() }
+}
+
+export class GetCustomTablesRequest extends RequestBase {
+  constructor(public readonly campaignId: string) { super() }
+}

@@ -45,3 +45,15 @@ export class UpdateSpellSlotsRequest extends RequestBase {
     public readonly spellSlots: SpellSlot[],
   ) { super() }
 }
+
+export class LoadCharacterRequest extends RequestBase {
+  constructor(public readonly characterId: string) { super() }
+}
+
+export class UpdateXpRequest extends RequestBase {
+  constructor(
+    public readonly characterId: string,
+    public readonly xp: number,
+    public readonly level: number,
+  ) { super() }
+}

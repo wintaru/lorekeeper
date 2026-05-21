@@ -34,6 +34,7 @@ function rowToCharacter(row: Record<string, unknown>): Character {
     characterName: row.character_name as string,
     class: row.class as string,
     level: row.level as number,
+    xp: (row.xp as number) ?? 0,
     maxHp: row.max_hp as number,
     currentHp: row.current_hp as number,
     armorClass: row.armor_class as number,

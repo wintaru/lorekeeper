@@ -1,5 +1,5 @@
 import { ResponseBase } from '@/common/ResponseBase'
-import type { Npc, Location, SessionNote, InventoryItem } from '@/types'
+import type { Npc, Location, SessionNote, InventoryItem, CustomTable } from '@/types'
 
 export class NpcResponse extends ResponseBase {
   readonly correlationId: string
@@ -116,6 +116,36 @@ export class GetInventoryResponse extends ResponseBase {
     this.correlationId = correlationId
     this.gold = gold
     this.sharedItems = sharedItems
+    this.success = errorMessage === undefined
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class CustomTableResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+  readonly table: CustomTable | null
+
+  constructor(correlationId: string, table: CustomTable | null, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.table = table
+    this.success = table !== null
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class GetCustomTablesResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+  readonly tables: CustomTable[]
+
+  constructor(correlationId: string, tables: CustomTable[], errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.tables = tables
     this.success = errorMessage === undefined
     this.errorMessage = errorMessage ?? null
   }

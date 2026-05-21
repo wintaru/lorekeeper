@@ -15,6 +15,8 @@ import { UpdateCharacterHpHandler } from '@/accessors/character/handlers/UpdateC
 import { UpdateConditionsHandler as AccessorUpdateConditionsHandler } from '@/accessors/character/handlers/UpdateConditionsHandler'
 import { UpdateDeathSavesHandler as AccessorUpdateDeathSavesHandler } from '@/accessors/character/handlers/UpdateDeathSavesHandler'
 import { UpdateSpellSlotsHandler as AccessorUpdateSpellSlotsHandler } from '@/accessors/character/handlers/UpdateSpellSlotsHandler'
+import { LoadCharacterHandler } from '@/accessors/character/handlers/LoadCharacterHandler'
+import { UpdateXpHandler } from '@/accessors/character/handlers/UpdateXpHandler'
 import {
   StoreCharacterRequest,
   LoadRosterRequest,
@@ -22,6 +24,8 @@ import {
   UpdateCharacterConditionsRequest,
   UpdateDeathSavesRequest as AccessorUpdateDeathSavesRequest,
   UpdateSpellSlotsRequest as AccessorUpdateSpellSlotsRequest,
+  LoadCharacterRequest,
+  UpdateXpRequest,
 } from '@/accessors/character/CharacterRequests'
 
 // Accessors — Combat
@@ -53,6 +57,11 @@ import { FateEngine } from '@/engines/fate/FateEngine'
 import { SelectTargetHandler } from '@/engines/fate/handlers/SelectTargetHandler'
 import { SelectTargetRequest } from '@/engines/fate/FateEngineRequests'
 
+// Engines — XP
+import { XpEngine } from '@/engines/xp/XpEngine'
+import { CalculateLevelHandler } from '@/engines/xp/handlers/CalculateLevelHandler'
+import { CalculateLevelRequest } from '@/engines/xp/XpEngineRequests'
+
 // Managers — Campaign
 import { CampaignManager } from '@/managers/campaign/CampaignManager'
 import { CreateCampaignHandler } from '@/managers/campaign/handlers/CreateCampaignHandler'
@@ -67,11 +76,15 @@ import { UpdateHpHandler } from '@/managers/character/handlers/UpdateHpHandler'
 import { UpdateConditionsHandler as ManagerUpdateConditionsHandler } from '@/managers/character/handlers/UpdateConditionsHandler'
 import { UpdateDeathSavesHandler as ManagerUpdateDeathSavesHandler } from '@/managers/character/handlers/UpdateDeathSavesHandler'
 import { UpdateSpellSlotsHandler as ManagerUpdateSpellSlotsHandler } from '@/managers/character/handlers/UpdateSpellSlotsHandler'
+import { AwardXpHandler } from '@/managers/character/handlers/AwardXpHandler'
+import { WhisperHandler } from '@/managers/character/handlers/WhisperHandler'
 import {
   UpdateHpRequest,
   UpdateConditionsRequest,
   UpdateDeathSavesRequest,
   UpdateSpellSlotsRequest,
+  AwardXpRequest,
+  WhisperRequest,
 } from '@/managers/character/CharacterRequests'
 
 // Managers — Combat
@@ -110,6 +123,10 @@ import { LoadCampaignInventoryHandler } from '@/accessors/world/handlers/LoadCam
 import { RemoveNpcHandler } from '@/accessors/world/handlers/RemoveNpcHandler'
 import { RemoveLocationHandler } from '@/accessors/world/handlers/RemoveLocationHandler'
 import { RemoveSessionNoteHandler } from '@/accessors/world/handlers/RemoveSessionNoteHandler'
+import { StoreCustomTableHandler } from '@/accessors/world/handlers/StoreCustomTableHandler'
+import { UpdateCustomTableHandler } from '@/accessors/world/handlers/UpdateCustomTableHandler'
+import { LoadCustomTablesHandler } from '@/accessors/world/handlers/LoadCustomTablesHandler'
+import { RemoveCustomTableHandler } from '@/accessors/world/handlers/RemoveCustomTableHandler'
 import {
   StoreNpcRequest,
   UpdateNpcRequest,
@@ -125,6 +142,10 @@ import {
   RemoveNpcRequest,
   RemoveLocationRequest,
   RemoveSessionNoteRequest,
+  StoreCustomTableRequest,
+  UpdateCustomTableRequest,
+  LoadCustomTablesRequest,
+  RemoveCustomTableRequest,
 } from '@/accessors/world/WorldRequests'
 
 // Managers — World
@@ -143,6 +164,10 @@ import { GetNpcsHandler } from '@/managers/world/handlers/GetNpcsHandler'
 import { GetLocationsHandler } from '@/managers/world/handlers/GetLocationsHandler'
 import { GetSessionNotesHandler } from '@/managers/world/handlers/GetSessionNotesHandler'
 import { GetInventoryHandler } from '@/managers/world/handlers/GetInventoryHandler'
+import { AddCustomTableHandler } from '@/managers/world/handlers/AddCustomTableHandler'
+import { EditCustomTableHandler } from '@/managers/world/handlers/EditCustomTableHandler'
+import { DeleteCustomTableHandler } from '@/managers/world/handlers/DeleteCustomTableHandler'
+import { GetCustomTablesHandler } from '@/managers/world/handlers/GetCustomTablesHandler'
 import {
   AddNpcRequest,
   EditNpcRequest,
@@ -158,6 +183,10 @@ import {
   GetLocationsRequest,
   GetSessionNotesRequest,
   GetInventoryRequest,
+  AddCustomTableRequest,
+  EditCustomTableRequest,
+  DeleteCustomTableRequest,
+  GetCustomTablesRequest,
 } from '@/managers/world/WorldRequests'
 
 import type { ICampaignManager } from '@/managers/campaign/ICampaignManager'
@@ -195,9 +224,11 @@ export function createContainer(): Container {
       .register(UpdateCharacterConditionsRequest, new AccessorUpdateConditionsHandler(db))
       .register(AccessorUpdateDeathSavesRequest, new AccessorUpdateDeathSavesHandler(db))
       .register(AccessorUpdateSpellSlotsRequest, new AccessorUpdateSpellSlotsHandler(db))
+      .register(UpdateXpRequest, new UpdateXpHandler(db))
       .build(),
     new HandlerResolverBuilder()
       .register(LoadRosterRequest, new LoadRosterHandler(db))
+      .register(LoadCharacterRequest, new LoadCharacterHandler(db))
       .build(),
   )
 
@@ -239,6 +270,12 @@ export function createContainer(): Container {
       .build(),
   )
 
+  const xpEngine = new XpEngine(
+    new HandlerResolverBuilder()
+      .register(CalculateLevelRequest, new CalculateLevelHandler())
+      .build(),
+  )
+
   // ── Managers ───────────────────────────────────────────────────────────────
 
   const campaignManager = new CampaignManager(
@@ -258,6 +295,8 @@ export function createContainer(): Container {
       .register(UpdateConditionsRequest, new ManagerUpdateConditionsHandler(characterAccessor))
       .register(UpdateDeathSavesRequest, new ManagerUpdateDeathSavesHandler(characterAccessor))
       .register(UpdateSpellSlotsRequest, new ManagerUpdateSpellSlotsHandler(characterAccessor))
+      .register(AwardXpRequest, new AwardXpHandler(characterAccessor, xpEngine, notificationAccessor))
+      .register(WhisperRequest, new WhisperHandler(characterAccessor, notificationAccessor))
       .build(),
   )
 
@@ -292,17 +331,21 @@ export function createContainer(): Container {
       .register(StoreSessionNoteRequest, new StoreSessionNoteHandler(db))
       .register(UpdateCampaignInventoryRequest, new UpdateCampaignInventoryHandler(db))
       .register(AccessorUpdateCharacterLootRequest, new AccessorUpdateCharacterLootHandler(db))
+      .register(StoreCustomTableRequest, new StoreCustomTableHandler(db))
+      .register(UpdateCustomTableRequest, new UpdateCustomTableHandler(db))
       .build(),
     new HandlerResolverBuilder()
       .register(LoadNpcsRequest, new LoadNpcsHandler(db))
       .register(LoadLocationsRequest, new LoadLocationsHandler(db))
       .register(LoadSessionNotesRequest, new LoadSessionNotesHandler(db))
       .register(LoadCampaignInventoryRequest, new LoadCampaignInventoryHandler(db))
+      .register(LoadCustomTablesRequest, new LoadCustomTablesHandler(db))
       .build(),
     new HandlerResolverBuilder()
       .register(RemoveNpcRequest, new RemoveNpcHandler(db))
       .register(RemoveLocationRequest, new RemoveLocationHandler(db))
       .register(RemoveSessionNoteRequest, new RemoveSessionNoteHandler(db))
+      .register(RemoveCustomTableRequest, new RemoveCustomTableHandler(db))
       .build(),
   )
 
@@ -318,12 +361,16 @@ export function createContainer(): Container {
       .register(DeleteSessionNoteRequest, new DeleteSessionNoteHandler(worldAccessor))
       .register(UpdateInventoryRequest, new UpdateInventoryHandler(worldAccessor))
       .register(ManagerUpdateCharacterLootRequest, new ManagerUpdateCharacterLootHandler(worldAccessor))
+      .register(AddCustomTableRequest, new AddCustomTableHandler(worldAccessor))
+      .register(EditCustomTableRequest, new EditCustomTableHandler(worldAccessor))
+      .register(DeleteCustomTableRequest, new DeleteCustomTableHandler(worldAccessor))
       .build(),
     new HandlerResolverBuilder()
       .register(GetNpcsRequest, new GetNpcsHandler(worldAccessor))
       .register(GetLocationsRequest, new GetLocationsHandler(worldAccessor))
       .register(GetSessionNotesRequest, new GetSessionNotesHandler(worldAccessor))
       .register(GetInventoryRequest, new GetInventoryHandler(worldAccessor))
+      .register(GetCustomTablesRequest, new GetCustomTablesHandler(worldAccessor))
       .build(),
   )
 

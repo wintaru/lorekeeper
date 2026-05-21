@@ -82,3 +82,31 @@ export class UpdateSpellSlotsResponse extends ResponseBase {
     this.errorMessage = errorMessage ?? null
   }
 }
+
+export class LoadCharacterResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+  readonly character: Character | null
+
+  constructor(correlationId: string, character: Character | null, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.character = character
+    this.success = character !== null
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class UpdateXpResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+
+  constructor(correlationId: string, success: boolean, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.success = success
+    this.errorMessage = errorMessage ?? null
+  }
+}

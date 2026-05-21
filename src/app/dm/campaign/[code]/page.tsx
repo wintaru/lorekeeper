@@ -3,10 +3,24 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import type { Character, FateEvent, FateEventType, CombatSession, Condition, DeathSaves, Npc, Location, SessionNote, InventoryItem, LootItem, NpcRelationship } from '@/types'
+import type { Character, FateEvent, FateEventType, CombatSession, Condition, DeathSaves, Npc, Location, SessionNote, InventoryItem, LootItem, NpcRelationship, CustomTable } from '@/types'
 
 type Tab = 'roster' | 'combat' | 'fate' | 'world'
-type WorldTab = 'npcs' | 'locations' | 'inventory' | 'log'
+type WorldTab = 'npcs' | 'locations' | 'inventory' | 'log' | 'tables'
+
+// D&D 5e XP thresholds — index = level - 1
+const XP_THRESHOLDS = [0,300,900,2700,6500,14000,23000,34000,48000,64000,85000,100000,120000,140000,165000,195000,225000,265000,305000,355000]
+function xpToLevel(xp: number) { let l = 1; for (let i = 0; i < 20; i++) { if (xp >= XP_THRESHOLDS[i]) l = i + 1 } return l }
+function xpForNextLevel(level: number) { return level >= 20 ? null : XP_THRESHOLDS[level] }
+
+const BUILT_IN_TABLES: Record<string, { label: string; entries: string[] }> = {
+  names: { label: 'Fantasy Names', entries: ['Aelindra','Borin','Caelum','Dorvak','Elenara','Fendrel','Galindra','Halgrim','Ilyana','Jorvek','Kira','Lundak','Mirela','Norgrim','Opalind','Pyra','Quelara','Rodvar','Silvara','Thorin','Ulindra','Varek','Windara','Xandrel','Yelara','Zorvak'] },
+  weather: { label: 'Weather', entries: ['Clear skies','Partly cloudy','Overcast','Light rain','Heavy rain','Thunderstorm','Dense fog','Light snow','Blizzard','Scorching heat','Gentle breeze','Strong winds','Hailstorm','Sleet','Magical aurora'] },
+  encounters: { label: 'Encounter Hooks', entries: ['A merchant is being robbed in broad daylight','An old woman offers a job "too dangerous for adventurers"','Strange lights in the abandoned tower to the north','The innkeeper\'s daughter has gone missing','A wounded soldier stumbles in with no memory','A letter addressed to the party arrives by raven','The local temple is under quarantine','A cart of goods abandoned on the road','Wanted posters bear a resemblance to the party','A traveling carnival arrived overnight','A child claims to have seen a dragon','The road ahead is blocked by a collapsed bridge'] },
+  loot: { label: 'Loot', entries: ['2d10 gold pieces','A silver ring (25 gp)','Potion of Healing','A torn map fragment','1d6 gems worth 10 gp each','A mysterious sealed letter','Masterwork longsword','An ivory figurine (50 gp)','Spell scroll (level 1)','A cursed trinket','A pouch of exotic spices (15 gp)','A set of loaded dice'] },
+}
+
+type RollEntry = { label: string; result: number | string; timestamp: Date }
 
 const EVENT_TYPES: { value: FateEventType; label: string; description: string }[] = [
   { value: 'attack',   label: 'Attack',   description: 'Someone is targeted by danger' },
@@ -23,6 +37,8 @@ export default function DmControlPanel() {
   const [characters, setCharacters] = useState<Character[]>([])
   const [combatSession, setCombatSession] = useState<CombatSession | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showDice, setShowDice] = useState(false)
+  const [rollHistory, setRollHistory] = useState<RollEntry[]>([])
 
   const fetchRoster = useCallback(async (cid: string) => {
     const res = await fetch(`/api/campaigns/roster?campaignId=${cid}`)
@@ -87,6 +103,9 @@ export default function DmControlPanel() {
               ⚔ R{combatSession.roundNumber}
             </span>
           )}
+          <button onClick={() => setShowDice(v => !v)}
+            className={`text-lg px-2 py-1 rounded transition-colors ${showDice ? 'text-amber-400 bg-amber-950/40' : 'text-stone-500 hover:text-stone-300'}`}
+            title="Dice roller">🎲</button>
           <span className="text-xs text-stone-500 bg-stone-900 px-2 py-1 rounded">
             {characters.length} player{characters.length !== 1 ? 's' : ''}
           </span>
@@ -109,8 +128,15 @@ export default function DmControlPanel() {
         ))}
       </div>
 
+      {showDice && (
+        <DicePanel
+          history={rollHistory}
+          onRoll={entry => setRollHistory(prev => [entry, ...prev].slice(0, 20))}
+        />
+      )}
+
       <div className="p-4 max-w-2xl mx-auto">
-        {tab === 'roster' && <RosterTab characters={characters} code={code} />}
+        {tab === 'roster' && <RosterTab characters={characters} code={code} onRosterRefresh={() => void fetchRoster(campaignId!)} />}
         {tab === 'combat' && campaignId && (
           <CombatTab
             campaignId={campaignId}
@@ -133,7 +159,7 @@ export default function DmControlPanel() {
 
 // ── Roster Tab ────────────────────────────────────────────────────────────────
 
-function RosterTab({ characters, code }: { characters: Character[]; code: string }) {
+function RosterTab({ characters, code, onRosterRefresh }: { characters: Character[]; code: string; onRosterRefresh: () => void }) {
   if (characters.length === 0) {
     return (
       <div className="text-center py-16 text-stone-500">
@@ -145,14 +171,42 @@ function RosterTab({ characters, code }: { characters: Character[]; code: string
   }
   return (
     <div className="space-y-3">
-      {characters.map(c => <CharacterCard key={c.id} character={c} />)}
+      {characters.map(c => <CharacterCard key={c.id} character={c} onRefresh={onRosterRefresh} />)}
     </div>
   )
 }
 
-function CharacterCard({ character: c }: { character: Character }) {
+function CharacterCard({ character: c, onRefresh }: { character: Character; onRefresh: () => void }) {
   const hpPercent = Math.max(0, (c.currentHp / c.maxHp) * 100)
   const hpColor = hpPercent > 50 ? 'bg-emerald-500' : hpPercent > 25 ? 'bg-yellow-500' : 'bg-red-500'
+  const level = xpToLevel(c.xp)
+  const nextXp = xpForNextLevel(level)
+  const [xpInput, setXpInput] = useState('')
+  const [whisperText, setWhisperText] = useState('')
+  const [showWhisper, setShowWhisper] = useState(false)
+  const [whisperSent, setWhisperSent] = useState(false)
+
+  async function handleAwardXp() {
+    const amount = parseInt(xpInput, 10)
+    if (!amount) return
+    await fetch('/api/characters/xp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId: c.id, xpToAdd: amount }),
+    })
+    setXpInput(''); onRefresh()
+  }
+
+  async function handleWhisper() {
+    if (!whisperText.trim()) return
+    await fetch('/api/push/whisper', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId: c.id, message: whisperText.trim() }),
+    })
+    setWhisperText(''); setWhisperSent(true)
+    setTimeout(() => { setWhisperSent(false); setShowWhisper(false) }, 2000)
+  }
 
   return (
     <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-3">
@@ -169,17 +223,57 @@ function CharacterCard({ character: c }: { character: Character }) {
       <div className="h-1.5 bg-stone-800 rounded-full overflow-hidden">
         <div className={`h-full rounded-full transition-all ${hpColor}`} style={{ width: `${hpPercent}%` }} />
       </div>
-      <div className="flex items-center gap-3 text-sm text-stone-400">
+      <div className="flex items-center gap-3 text-sm text-stone-400 flex-wrap">
         <span>AC {c.armorClass}</span>
         {c.conditions.length > 0 && (
           <span className="text-amber-400">{c.conditions.map(cn => cn.name).join(', ')}</span>
         )}
         {c.currentHp === 0 && (
-          <span className="text-red-400 text-xs">
-            💀 {c.deathSaves.successes}S / {c.deathSaves.failures}F
-          </span>
+          <span className="text-red-400 text-xs">💀 {c.deathSaves.successes}S / {c.deathSaves.failures}F</span>
         )}
         {c.pushSubscription && <span className="text-emerald-600 text-xs">● push</span>}
+      </div>
+
+      {/* XP */}
+      <div className="border-t border-stone-800/50 pt-3 space-y-2">
+        <div className="flex items-center justify-between text-xs text-stone-500">
+          <span>{c.xp.toLocaleString()} XP · Level {level}</span>
+          {nextXp && <span>{(nextXp - c.xp).toLocaleString()} to next level</span>}
+        </div>
+        {nextXp && (
+          <div className="h-1 bg-stone-800 rounded-full overflow-hidden">
+            <div className="h-full bg-violet-600 rounded-full transition-all"
+              style={{ width: `${Math.min(100, ((c.xp - XP_THRESHOLDS[level - 1]) / (nextXp - XP_THRESHOLDS[level - 1])) * 100)}%` }} />
+          </div>
+        )}
+        <div className="flex gap-2 items-center">
+          <input type="number" min={1} placeholder="Award XP" value={xpInput}
+            onChange={e => setXpInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') void handleAwardXp() }}
+            className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm font-mono focus:outline-none focus:border-violet-500" />
+          <button onClick={() => void handleAwardXp()}
+            className="bg-violet-800 hover:bg-violet-700 text-violet-100 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">
+            +XP
+          </button>
+          {c.pushSubscription && (
+            <button onClick={() => setShowWhisper(v => !v)}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${showWhisper ? 'border-amber-500 text-amber-400' : 'border-stone-700 text-stone-500 hover:text-stone-300'}`}>
+              Whisper
+            </button>
+          )}
+        </div>
+        {showWhisper && (
+          <div className="flex gap-2">
+            <input placeholder="Secret message…" value={whisperText}
+              onChange={e => setWhisperText(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') void handleWhisper() }}
+              className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-amber-500" />
+            <button onClick={() => void handleWhisper()}
+              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${whisperSent ? 'bg-emerald-800 text-emerald-200' : 'bg-amber-700 hover:bg-amber-600 text-white'}`}>
+              {whisperSent ? 'Sent!' : 'Send'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -781,12 +875,12 @@ function WorldTab({ campaignId, characters }: { campaignId: string; characters: 
     void Promise.all([fetchNpcs(), fetchLocations(), fetchSessionNotes(), fetchInventory()])
   }, [fetchNpcs, fetchLocations, fetchSessionNotes, fetchInventory])
 
-  const WORLD_LABELS: Record<WorldTab, string> = { npcs: 'NPCs', locations: 'Locations', inventory: 'Inventory', log: 'Session Log' }
+  const WORLD_LABELS: Record<WorldTab, string> = { npcs: 'NPCs', locations: 'Locations', inventory: 'Inventory', log: 'Log', tables: 'Tables' }
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-1 bg-stone-900 rounded-lg p-1">
-        {(['npcs', 'locations', 'inventory', 'log'] as WorldTab[]).map(t => (
+      <div className="flex gap-1 bg-stone-900 rounded-lg p-1 overflow-x-auto">
+        {(['npcs', 'locations', 'inventory', 'log', 'tables'] as WorldTab[]).map(t => (
           <button key={t} onClick={() => setWorldTab(t)}
             className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${
               worldTab === t ? 'bg-stone-700 text-stone-100' : 'text-stone-500 hover:text-stone-300'
@@ -811,6 +905,9 @@ function WorldTab({ campaignId, characters }: { campaignId: string; characters: 
       )}
       {worldTab === 'log' && (
         <SessionLogSection campaignId={campaignId} notes={sessionNotes} onRefresh={fetchSessionNotes} />
+      )}
+      {worldTab === 'tables' && (
+        <TablesSection campaignId={campaignId} />
       )}
     </div>
   )
@@ -1308,6 +1405,207 @@ function SessionLogSection({ campaignId, notes, onRefresh }: {
 }
 
 // ── Type guards ───────────────────────────────────────────────────────────────
+
+// ── Dice Panel ────────────────────────────────────────────────────────────────
+
+function rollExpression(expr: string): number | null {
+  const m = expr.trim().match(/^(\d+)d(\d+)([+-]\d+)?$/i)
+  if (!m) return null
+  let total = m[3] ? parseInt(m[3]) : 0
+  const sides = parseInt(m[2])
+  for (let i = 0; i < parseInt(m[1]); i++) total += Math.floor(Math.random() * sides) + 1
+  return total
+}
+
+function DicePanel({ history, onRoll }: { history: RollEntry[]; onRoll: (e: RollEntry) => void }) {
+  const [custom, setCustom] = useState('')
+  const STD = [4, 6, 8, 10, 12, 20, 100]
+
+  function roll(label: string, expr: string) {
+    const result = rollExpression(expr)
+    if (result !== null) onRoll({ label, result, timestamp: new Date() })
+  }
+
+  function rollCustom() {
+    const expr = custom.trim()
+    if (!expr) return
+    const result = rollExpression(expr) ?? `Invalid: ${expr}`
+    onRoll({ label: expr, result, timestamp: new Date() })
+  }
+
+  return (
+    <div className="border-b border-stone-800 bg-stone-950/80 px-4 py-3 space-y-3">
+      <div className="flex flex-wrap gap-2">
+        {STD.map(d => (
+          <button key={d} onClick={() => roll(`d${d}`, `1d${d}`)}
+            className="bg-stone-800 hover:bg-amber-700 text-stone-200 text-sm font-bold w-12 h-10 rounded-lg transition-colors">
+            d{d}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input placeholder="e.g. 2d6+3" value={custom} onChange={e => setCustom(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') rollCustom() }}
+          className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-amber-500" />
+        <button onClick={rollCustom}
+          className="bg-amber-700 hover:bg-amber-600 text-white text-sm px-4 py-1.5 rounded-lg transition-colors">Roll</button>
+      </div>
+      {history.length > 0 && (
+        <div className="flex gap-2 flex-wrap max-h-16 overflow-y-auto">
+          {history.map((e, i) => (
+            <span key={i} className="text-xs bg-stone-800 text-stone-300 px-2 py-1 rounded-lg font-mono">
+              <span className="text-stone-500">{e.label}:</span> <span className="text-amber-400 font-bold">{e.result}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Tables Section ────────────────────────────────────────────────────────────
+
+function TablesSection({ campaignId }: { campaignId: string }) {
+  const [customTables, setCustomTables] = useState<CustomTable[]>([])
+  const [lastRoll, setLastRoll] = useState<{ table: string; result: string } | null>(null)
+  const [showNewForm, setShowNewForm] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newEntries, setNewEntries] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editEntries, setEditEntries] = useState('')
+
+  const fetchTables = useCallback(async () => {
+    const res = await fetch(`/api/world/tables?campaignId=${campaignId}`)
+    const data: unknown = await res.json()
+    if (isCustomTablesResponse(data)) setCustomTables(data.tables)
+  }, [campaignId])
+
+  useEffect(() => { void fetchTables() }, [fetchTables])
+
+  function rollTable(name: string, entries: string[]) {
+    if (entries.length === 0) return
+    const result = entries[Math.floor(Math.random() * entries.length)]
+    setLastRoll({ table: name, result })
+  }
+
+  async function handleCreate() {
+    if (!newName.trim()) return
+    const entries = newEntries.split('\n').map(e => e.trim()).filter(Boolean)
+    await fetch('/api/world/tables', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId, name: newName.trim(), entries }),
+    })
+    setNewName(''); setNewEntries(''); setShowNewForm(false); void fetchTables()
+  }
+
+  async function handleEdit(t: CustomTable) {
+    const entries = editEntries.split('\n').map(e => e.trim()).filter(Boolean)
+    await fetch(`/api/world/tables/${t.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: editName.trim(), entries }),
+    })
+    setEditingId(null); void fetchTables()
+  }
+
+  async function handleDelete(id: string) {
+    await fetch(`/api/world/tables/${id}`, { method: 'DELETE' })
+    void fetchTables()
+  }
+
+  return (
+    <div className="space-y-4">
+      {lastRoll && (
+        <div className="bg-amber-950/30 border border-amber-800/40 rounded-xl px-4 py-3 flex items-center justify-between">
+          <div>
+            <p className="text-xs text-amber-500 uppercase tracking-widest">{lastRoll.table}</p>
+            <p className="font-semibold text-amber-300 mt-0.5">{lastRoll.result}</p>
+          </div>
+          <button onClick={() => setLastRoll(null)} className="text-stone-600 hover:text-stone-400 text-xs">✕</button>
+        </div>
+      )}
+
+      <div>
+        <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Built-in Tables</p>
+        <div className="space-y-2">
+          {Object.entries(BUILT_IN_TABLES).map(([key, t]) => (
+            <div key={key} className="flex items-center justify-between bg-stone-900 border border-stone-800 rounded-xl px-4 py-3">
+              <div>
+                <p className="text-sm font-medium">{t.label}</p>
+                <p className="text-xs text-stone-500">{t.entries.length} entries</p>
+              </div>
+              <button onClick={() => rollTable(t.label, t.entries)}
+                className="bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors">
+                Roll
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Custom Tables</p>
+        <div className="space-y-2">
+          {customTables.map(t => (
+            <div key={t.id} className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
+              {editingId === t.id ? (
+                <div className="px-4 py-3 space-y-2">
+                  <input value={editName} onChange={e => setEditName(e.target.value)}
+                    className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+                  <textarea value={editEntries} onChange={e => setEditEntries(e.target.value)} rows={4}
+                    placeholder="One entry per line"
+                    className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 resize-none font-mono" />
+                  <div className="flex gap-2">
+                    <button onClick={() => void handleEdit(t)} className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-sm py-1.5 rounded-lg transition-colors">Save</button>
+                    <button onClick={() => setEditingId(null)} className="text-stone-500 hover:text-stone-300 text-sm px-3 transition-colors">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{t.name}</p>
+                    <p className="text-xs text-stone-500">{t.entries.length} entries</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => rollTable(t.name, t.entries)}
+                      className="bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors">Roll</button>
+                    <button onClick={() => { setEditingId(t.id); setEditName(t.name); setEditEntries(t.entries.join('\n')) }}
+                      className="text-stone-500 hover:text-stone-300 text-xs transition-colors">Edit</button>
+                    <button onClick={() => void handleDelete(t.id)} className="text-stone-600 hover:text-red-500 text-xs transition-colors">✕</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {showNewForm ? (
+          <div className="mt-2 bg-stone-900 border border-stone-800 rounded-xl px-4 py-3 space-y-2">
+            <input placeholder="Table name" value={newName} onChange={e => setNewName(e.target.value)}
+              className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+            <textarea placeholder="One entry per line" value={newEntries} onChange={e => setNewEntries(e.target.value)} rows={5}
+              className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 resize-none font-mono" />
+            <div className="flex gap-2">
+              <button onClick={() => void handleCreate()} className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-sm py-1.5 rounded-lg transition-colors">Create</button>
+              <button onClick={() => { setShowNewForm(false); setNewName(''); setNewEntries('') }} className="text-stone-500 hover:text-stone-300 text-sm px-3 transition-colors">Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setShowNewForm(true)}
+            className="mt-2 w-full border border-dashed border-stone-700 rounded-xl py-3 text-sm text-stone-500 hover:text-stone-300 hover:border-stone-500 transition-colors">
+            + New custom table
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function isCustomTablesResponse(v: unknown): v is { tables: CustomTable[] } {
+  return typeof v === 'object' && v !== null && 'tables' in v && Array.isArray((v as Record<string, unknown>).tables)
+}
 
 function isNpcsResponse(v: unknown): v is { npcs: Npc[] } {
   return typeof v === 'object' && v !== null && 'npcs' in v && Array.isArray((v as Record<string, unknown>).npcs)
