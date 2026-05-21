@@ -17,6 +17,23 @@ export interface Campaign {
   expiresAt: Date
 }
 
+export type FateEventType = 'attack' | 'curse' | 'windfall' | 'betrayal' | 'mystery'
+
+export interface FateEvent {
+  id: string
+  campaignId: string
+  eventType: FateEventType
+  targetCharacterId: string
+  revealedAt: Date | null
+  dmNote: string | null
+  createdAt: Date
+}
+
+export interface FatePoolEntry {
+  characterId: string
+  weight: number
+}
+
 export interface Character {
   id: string
   campaignId: string
