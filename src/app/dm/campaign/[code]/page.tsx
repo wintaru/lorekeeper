@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import type { Character, FateEvent, FateEventType, CombatSession, Condition, DeathSaves } from '@/types'
+import type { Character, FateEvent, FateEventType, CombatSession, Condition, DeathSaves, Npc, Location, SessionNote, InventoryItem, LootItem, NpcRelationship } from '@/types'
 
-type Tab = 'roster' | 'combat' | 'fate'
+type Tab = 'roster' | 'combat' | 'fate' | 'world'
+type WorldTab = 'npcs' | 'locations' | 'inventory' | 'log'
 
 const EVENT_TYPES: { value: FateEventType; label: string; description: string }[] = [
   { value: 'attack',   label: 'Attack',   description: 'Someone is targeted by danger' },
@@ -71,7 +72,7 @@ export default function DmControlPanel() {
     )
   }
 
-  const TAB_LABELS: Record<Tab, string> = { roster: 'Roster', combat: 'Combat', fate: 'Fate Engine' }
+  const TAB_LABELS: Record<Tab, string> = { roster: 'Roster', combat: 'Combat', fate: 'Fate Engine', world: 'World' }
 
   return (
     <main className="min-h-screen bg-stone-950 text-stone-100">
@@ -92,12 +93,12 @@ export default function DmControlPanel() {
         </div>
       </div>
 
-      <div className="border-b border-stone-800 flex">
-        {(['roster', 'combat', 'fate'] as Tab[]).map(t => (
+      <div className="border-b border-stone-800 flex overflow-x-auto">
+        {(['roster', 'combat', 'fate', 'world'] as Tab[]).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-5 py-2.5 text-sm font-medium transition-colors border-b-2 ${
+            className={`px-5 py-2.5 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
               tab === t
                 ? 'border-amber-500 text-amber-400'
                 : 'border-transparent text-stone-500 hover:text-stone-300'
@@ -121,6 +122,9 @@ export default function DmControlPanel() {
         )}
         {tab === 'fate' && campaignId && (
           <FateTab campaignId={campaignId} characters={characters} />
+        )}
+        {tab === 'world' && campaignId && (
+          <WorldTab campaignId={campaignId} characters={characters} />
         )}
       </div>
     </main>
@@ -739,8 +743,584 @@ function FateTab({ campaignId, characters }: { campaignId: string; characters: C
   )
 }
 
+// ── World Tab ─────────────────────────────────────────────────────────────────
+
+function WorldTab({ campaignId, characters }: { campaignId: string; characters: Character[] }) {
+  const [worldTab, setWorldTab] = useState<WorldTab>('npcs')
+  const [npcs, setNpcs] = useState<Npc[]>([])
+  const [locations, setLocations] = useState<Location[]>([])
+  const [sessionNotes, setSessionNotes] = useState<SessionNote[]>([])
+  const [gold, setGold] = useState(0)
+  const [sharedItems, setSharedItems] = useState<InventoryItem[]>([])
+
+  const fetchNpcs = useCallback(async () => {
+    const res = await fetch(`/api/world/npcs?campaignId=${campaignId}`)
+    const data: unknown = await res.json()
+    if (isNpcsResponse(data)) setNpcs(data.npcs)
+  }, [campaignId])
+
+  const fetchLocations = useCallback(async () => {
+    const res = await fetch(`/api/world/locations?campaignId=${campaignId}`)
+    const data: unknown = await res.json()
+    if (isLocationsResponse(data)) setLocations(data.locations)
+  }, [campaignId])
+
+  const fetchSessionNotes = useCallback(async () => {
+    const res = await fetch(`/api/world/session-notes?campaignId=${campaignId}`)
+    const data: unknown = await res.json()
+    if (isSessionNotesResponse(data)) setSessionNotes(data.notes)
+  }, [campaignId])
+
+  const fetchInventory = useCallback(async () => {
+    const res = await fetch(`/api/world/inventory?campaignId=${campaignId}`)
+    const data: unknown = await res.json()
+    if (isInventoryResponse(data)) { setGold(data.gold); setSharedItems(data.sharedItems) }
+  }, [campaignId])
+
+  useEffect(() => {
+    void Promise.all([fetchNpcs(), fetchLocations(), fetchSessionNotes(), fetchInventory()])
+  }, [fetchNpcs, fetchLocations, fetchSessionNotes, fetchInventory])
+
+  const WORLD_LABELS: Record<WorldTab, string> = { npcs: 'NPCs', locations: 'Locations', inventory: 'Inventory', log: 'Session Log' }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-1 bg-stone-900 rounded-lg p-1">
+        {(['npcs', 'locations', 'inventory', 'log'] as WorldTab[]).map(t => (
+          <button key={t} onClick={() => setWorldTab(t)}
+            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${
+              worldTab === t ? 'bg-stone-700 text-stone-100' : 'text-stone-500 hover:text-stone-300'
+            }`}>
+            {WORLD_LABELS[t]}
+          </button>
+        ))}
+      </div>
+
+      {worldTab === 'npcs' && (
+        <NpcsSection campaignId={campaignId} characters={characters} npcs={npcs} onRefresh={fetchNpcs} />
+      )}
+      {worldTab === 'locations' && (
+        <LocationsSection campaignId={campaignId} locations={locations} onRefresh={fetchLocations} />
+      )}
+      {worldTab === 'inventory' && (
+        <InventorySection
+          campaignId={campaignId} characters={characters}
+          gold={gold} sharedItems={sharedItems}
+          onRefresh={fetchInventory}
+        />
+      )}
+      {worldTab === 'log' && (
+        <SessionLogSection campaignId={campaignId} notes={sessionNotes} onRefresh={fetchSessionNotes} />
+      )}
+    </div>
+  )
+}
+
+// ── NPCs Section ──────────────────────────────────────────────────────────────
+
+function NpcsSection({ campaignId, characters, npcs, onRefresh }: {
+  campaignId: string; characters: Character[]; npcs: Npc[]; onRefresh: () => void
+}) {
+  const [showForm, setShowForm] = useState(false)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [form, setForm] = useState({ name: '', faction: '', lastLocation: '', notes: '', relationships: {} as Record<string, string> })
+
+  function resetForm() {
+    setForm({ name: '', faction: '', lastLocation: '', notes: '', relationships: {} })
+  }
+
+  async function handleAdd() {
+    if (!form.name.trim()) return
+    const relationships: NpcRelationship[] = characters
+      .filter(c => form.relationships[c.id]?.trim())
+      .map(c => ({ characterId: c.id, relationship: form.relationships[c.id].trim() }))
+    await fetch('/api/world/npcs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId, name: form.name.trim(), faction: form.faction || null, lastLocation: form.lastLocation || null, notes: form.notes || null, relationships }),
+    })
+    resetForm(); setShowForm(false); onRefresh()
+  }
+
+  async function handleEdit(npc: Npc) {
+    const relationships: NpcRelationship[] = characters
+      .filter(c => form.relationships[c.id]?.trim())
+      .map(c => ({ characterId: c.id, relationship: form.relationships[c.id].trim() }))
+    await fetch(`/api/world/npcs/${npc.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: form.name.trim(), faction: form.faction || null, lastLocation: form.lastLocation || null, notes: form.notes || null, relationships }),
+    })
+    setEditingId(null); onRefresh()
+  }
+
+  async function handleDelete(id: string) {
+    await fetch(`/api/world/npcs/${id}`, { method: 'DELETE' })
+    if (expandedId === id) setExpandedId(null)
+    onRefresh()
+  }
+
+  function startEdit(npc: Npc) {
+    const rel: Record<string, string> = {}
+    npc.relationships.forEach(r => { rel[r.characterId] = r.relationship })
+    setForm({ name: npc.name, faction: npc.faction ?? '', lastLocation: npc.lastLocation ?? '', notes: npc.notes ?? '', relationships: rel })
+    setEditingId(npc.id)
+    setExpandedId(npc.id)
+  }
+
+  return (
+    <div className="space-y-3">
+      {npcs.map(npc => (
+        <div key={npc.id} className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
+          <button onClick={() => setExpandedId(expandedId === npc.id ? null : npc.id)}
+            className="w-full flex items-start justify-between px-4 py-3 text-left">
+            <div>
+              <p className="font-medium">{npc.name}</p>
+              <p className="text-stone-500 text-xs mt-0.5">
+                {[npc.faction, npc.lastLocation].filter(Boolean).join(' · ') || 'No details'}
+              </p>
+            </div>
+            <span className="text-stone-600 text-xs mt-1">{expandedId === npc.id ? '▲' : '▼'}</span>
+          </button>
+
+          {expandedId === npc.id && (
+            <div className="border-t border-stone-800 px-4 py-3 space-y-3">
+              {editingId === npc.id ? (
+                <NpcForm form={form} setForm={setForm} characters={characters}
+                  onSave={() => void handleEdit(npc)} onCancel={() => setEditingId(null)} saveLabel="Save" />
+              ) : (
+                <>
+                  {npc.notes && (
+                    <div className="bg-amber-950/20 border border-amber-900/30 rounded-lg px-3 py-2">
+                      <p className="text-xs text-amber-500 mb-1">DM Notes</p>
+                      <p className="text-sm text-stone-300 whitespace-pre-wrap">{npc.notes}</p>
+                    </div>
+                  )}
+                  {npc.relationships.length > 0 && (
+                    <div>
+                      <p className="text-xs text-stone-500 mb-2">Relationships</p>
+                      <div className="space-y-1">
+                        {npc.relationships.map(r => {
+                          const char = characters.find(c => c.id === r.characterId)
+                          return char ? (
+                            <div key={r.characterId} className="flex gap-2 text-sm">
+                              <span className="text-stone-400 shrink-0">{char.characterName}:</span>
+                              <span className="text-stone-300">{r.relationship}</span>
+                            </div>
+                          ) : null
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={() => startEdit(npc)} className="text-xs text-stone-400 hover:text-stone-200 transition-colors">Edit</button>
+                    <button onClick={() => void handleDelete(npc.id)} className="text-xs text-red-600 hover:text-red-400 transition-colors">Delete</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {showForm ? (
+        <div className="bg-stone-900 border border-stone-800 rounded-xl px-4 py-4">
+          <p className="text-sm font-medium text-stone-300 mb-3">Add NPC</p>
+          <NpcForm form={form} setForm={setForm} characters={characters}
+            onSave={() => void handleAdd()} onCancel={() => { resetForm(); setShowForm(false) }} saveLabel="Add" />
+        </div>
+      ) : (
+        <button onClick={() => setShowForm(true)}
+          className="w-full border border-dashed border-stone-700 rounded-xl py-3 text-sm text-stone-500 hover:text-stone-300 hover:border-stone-500 transition-colors">
+          + Add NPC
+        </button>
+      )}
+    </div>
+  )
+}
+
+function NpcForm({ form, setForm, characters, onSave, onCancel, saveLabel }: {
+  form: { name: string; faction: string; lastLocation: string; notes: string; relationships: Record<string, string> }
+  setForm: React.Dispatch<React.SetStateAction<typeof form>>
+  characters: Character[]
+  onSave: () => void
+  onCancel: () => void
+  saveLabel: string
+}) {
+  return (
+    <div className="space-y-3">
+      <input placeholder="Name *" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+        className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+      <div className="grid grid-cols-2 gap-2">
+        <input placeholder="Faction" value={form.faction} onChange={e => setForm(p => ({ ...p, faction: e.target.value }))}
+          className="bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+        <input placeholder="Last location" value={form.lastLocation} onChange={e => setForm(p => ({ ...p, lastLocation: e.target.value }))}
+          className="bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+      </div>
+      <textarea placeholder="DM notes / secrets" value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} rows={2}
+        className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 resize-none" />
+      {characters.length > 0 && (
+        <div>
+          <p className="text-xs text-stone-500 mb-2">Relationships</p>
+          <div className="space-y-1.5">
+            {characters.map(c => (
+              <div key={c.id} className="flex items-center gap-2">
+                <span className="text-xs text-stone-400 w-24 shrink-0 truncate">{c.characterName}</span>
+                <input placeholder="Relationship…" value={form.relationships[c.id] ?? ''}
+                  onChange={e => setForm(p => ({ ...p, relationships: { ...p.relationships, [c.id]: e.target.value } }))}
+                  className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-amber-500" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button onClick={onSave} className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-sm font-medium py-2 rounded-lg transition-colors">{saveLabel}</button>
+        <button onClick={onCancel} className="px-4 text-stone-500 hover:text-stone-300 text-sm transition-colors">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+// ── Locations Section ─────────────────────────────────────────────────────────
+
+function LocationsSection({ campaignId, locations, onRefresh }: {
+  campaignId: string; locations: Location[]; onRefresh: () => void
+}) {
+  const [newName, setNewName] = useState('')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [editingNotes, setEditingNotes] = useState<Record<string, string>>({})
+
+  async function handleAdd() {
+    if (!newName.trim()) return
+    await fetch('/api/world/locations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId, name: newName.trim() }),
+    })
+    setNewName(''); onRefresh()
+  }
+
+  async function handleToggleVisited(loc: Location) {
+    await fetch(`/api/world/locations/${loc.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visited: !loc.visited, notes: loc.notes }),
+    })
+    onRefresh()
+  }
+
+  async function handleSaveNotes(loc: Location) {
+    await fetch(`/api/world/locations/${loc.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visited: loc.visited, notes: editingNotes[loc.id] ?? loc.notes ?? '' }),
+    })
+    onRefresh()
+  }
+
+  async function handleDelete(id: string) {
+    await fetch(`/api/world/locations/${id}`, { method: 'DELETE' })
+    onRefresh()
+  }
+
+  return (
+    <div className="space-y-2">
+      {locations.map(loc => (
+        <div key={loc.id} className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-3 px-4 py-3">
+            <button onClick={() => void handleToggleVisited(loc)}
+              className={`w-5 h-5 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${loc.visited ? 'bg-emerald-600 border-emerald-500' : 'border-stone-600'}`}>
+              {loc.visited && <span className="text-white text-xs leading-none">✓</span>}
+            </button>
+            <button onClick={() => {
+              setExpandedId(expandedId === loc.id ? null : loc.id)
+              if (!editingNotes[loc.id]) setEditingNotes(p => ({ ...p, [loc.id]: loc.notes ?? '' }))
+            }} className="flex-1 text-left">
+              <p className={`text-sm font-medium ${loc.visited ? 'text-stone-400' : 'text-stone-100'}`}>{loc.name}</p>
+              {loc.notes && <p className="text-xs text-stone-600 truncate mt-0.5">{loc.notes}</p>}
+            </button>
+            <button onClick={() => void handleDelete(loc.id)} className="text-stone-700 hover:text-red-500 text-xs transition-colors">✕</button>
+          </div>
+          {expandedId === loc.id && (
+            <div className="border-t border-stone-800 px-4 py-3 space-y-2">
+              <textarea
+                placeholder="Notes…"
+                rows={3}
+                value={editingNotes[loc.id] ?? loc.notes ?? ''}
+                onChange={e => setEditingNotes(p => ({ ...p, [loc.id]: e.target.value }))}
+                className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 resize-none"
+              />
+              <button onClick={() => void handleSaveNotes(loc)}
+                className="text-xs bg-stone-700 hover:bg-stone-600 text-stone-200 px-3 py-1.5 rounded-lg transition-colors">
+                Save notes
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+
+      <div className="flex gap-2">
+        <input placeholder="New location…" value={newName} onChange={e => setNewName(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') void handleAdd() }}
+          className="flex-1 bg-stone-900 border border-stone-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500" />
+        <button onClick={() => void handleAdd()}
+          className="bg-stone-800 hover:bg-stone-700 text-stone-300 text-sm px-4 py-2.5 rounded-xl transition-colors">
+          Add
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Inventory Section ─────────────────────────────────────────────────────────
+
+function InventorySection({ campaignId, characters, gold, sharedItems, onRefresh }: {
+  campaignId: string; characters: Character[]; gold: number; sharedItems: InventoryItem[]; onRefresh: () => void
+}) {
+  const [goldInput, setGoldInput] = useState('')
+  const [editingGold, setEditingGold] = useState(false)
+  const [newItem, setNewItem] = useState({ name: '', quantity: '1', notes: '' })
+  const [showItemForm, setShowItemForm] = useState(false)
+  const [lootInputs, setLootInputs] = useState<Record<string, { name: string; quantity: string }>>({})
+  const [expandedChar, setExpandedChar] = useState<string | null>(null)
+
+  async function handleGoldUpdate(delta?: number) {
+    const newGold = delta !== undefined ? Math.max(0, gold + delta) : Math.max(0, parseInt(goldInput, 10) || 0)
+    await fetch('/api/world/inventory', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId, gold: newGold, sharedItems }),
+    })
+    setEditingGold(false); setGoldInput(''); onRefresh()
+  }
+
+  async function handleAddItem() {
+    if (!newItem.name.trim()) return
+    const item: InventoryItem = { name: newItem.name.trim(), quantity: parseInt(newItem.quantity, 10) || 1, notes: newItem.notes || null }
+    await fetch('/api/world/inventory', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId, gold, sharedItems: [...sharedItems, item] }),
+    })
+    setNewItem({ name: '', quantity: '1', notes: '' }); setShowItemForm(false); onRefresh()
+  }
+
+  async function handleRemoveItem(idx: number) {
+    const updated = sharedItems.filter((_, i) => i !== idx)
+    await fetch('/api/world/inventory', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId, gold, sharedItems: updated }),
+    })
+    onRefresh()
+  }
+
+  async function handleAddLoot(char: Character) {
+    const input = lootInputs[char.id]
+    if (!input?.name?.trim()) return
+    const item: LootItem = { name: input.name.trim(), quantity: parseInt(input.quantity, 10) || 1, notes: null }
+    await fetch('/api/world/character-loot', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId: char.id, loot: [...char.loot, item] }),
+    })
+    setLootInputs(p => ({ ...p, [char.id]: { name: '', quantity: '1' } })); onRefresh()
+  }
+
+  async function handleRemoveLoot(char: Character, idx: number) {
+    const updated = char.loot.filter((_, i) => i !== idx)
+    await fetch('/api/world/character-loot', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId: char.id, loot: updated }),
+    })
+    onRefresh()
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Gold */}
+      <div className="bg-stone-900 border border-stone-800 rounded-xl p-4">
+        <p className="text-xs text-stone-500 uppercase tracking-widest mb-3">Party Gold</p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => void handleGoldUpdate(-10)} className="w-8 h-8 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-sm transition-colors">−10</button>
+          <button onClick={() => void handleGoldUpdate(-1)} className="w-8 h-8 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-sm transition-colors">−1</button>
+          {editingGold ? (
+            <input type="number" value={goldInput} onChange={e => setGoldInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') void handleGoldUpdate() }}
+              onBlur={() => void handleGoldUpdate()}
+              autoFocus
+              className="flex-1 bg-stone-800 border border-amber-500 rounded-lg px-3 py-1.5 text-center text-xl font-bold font-mono focus:outline-none" />
+          ) : (
+            <button onClick={() => { setGoldInput(String(gold)); setEditingGold(true) }}
+              className="flex-1 text-center text-3xl font-bold text-amber-400 tabular-nums">
+              {gold.toLocaleString()} <span className="text-xs text-stone-500 font-normal">gp</span>
+            </button>
+          )}
+          <button onClick={() => void handleGoldUpdate(1)} className="w-8 h-8 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-sm transition-colors">+1</button>
+          <button onClick={() => void handleGoldUpdate(10)} className="w-8 h-8 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-sm transition-colors">+10</button>
+        </div>
+      </div>
+
+      {/* Shared items */}
+      <div>
+        <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Shared Items</p>
+        <div className="space-y-1.5">
+          {sharedItems.map((item, idx) => (
+            <div key={idx} className="flex items-center gap-2 bg-stone-900 border border-stone-800 rounded-lg px-3 py-2">
+              <span className="text-stone-500 text-xs font-mono w-6 text-center">{item.quantity}×</span>
+              <span className="flex-1 text-sm">{item.name}</span>
+              {item.notes && <span className="text-xs text-stone-500">{item.notes}</span>}
+              <button onClick={() => void handleRemoveItem(idx)} className="text-stone-700 hover:text-red-500 text-xs transition-colors">✕</button>
+            </div>
+          ))}
+          {sharedItems.length === 0 && !showItemForm && (
+            <p className="text-xs text-stone-600 italic px-1">No shared items</p>
+          )}
+        </div>
+        {showItemForm ? (
+          <div className="mt-2 space-y-2">
+            <div className="flex gap-2">
+              <input placeholder="Item name" value={newItem.name} onChange={e => setNewItem(p => ({ ...p, name: e.target.value }))}
+                className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+              <input type="number" min={1} placeholder="Qty" value={newItem.quantity} onChange={e => setNewItem(p => ({ ...p, quantity: e.target.value }))}
+                className="w-16 bg-stone-800 border border-stone-700 rounded-lg px-2 py-2 text-sm text-center font-mono focus:outline-none focus:border-amber-500" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => void handleAddItem()} className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-sm py-2 rounded-lg transition-colors">Add</button>
+              <button onClick={() => setShowItemForm(false)} className="text-stone-500 hover:text-stone-300 text-sm px-3 transition-colors">Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setShowItemForm(true)}
+            className="mt-2 text-xs text-stone-500 hover:text-amber-400 transition-colors">
+            + Add item
+          </button>
+        )}
+      </div>
+
+      {/* Character loot */}
+      {characters.length > 0 && (
+        <div>
+          <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Individual Loot</p>
+          <div className="space-y-2">
+            {characters.map(char => (
+              <div key={char.id} className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
+                <button onClick={() => setExpandedChar(expandedChar === char.id ? null : char.id)}
+                  className="w-full flex items-center justify-between px-4 py-2.5 text-left">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{char.characterName}</span>
+                    {char.loot.length > 0 && (
+                      <span className="text-xs text-stone-500">{char.loot.length} item{char.loot.length !== 1 ? 's' : ''}</span>
+                    )}
+                  </div>
+                  <span className="text-stone-600 text-xs">{expandedChar === char.id ? '▲' : '▼'}</span>
+                </button>
+                {expandedChar === char.id && (
+                  <div className="border-t border-stone-800 px-4 py-3 space-y-2">
+                    {char.loot.map((item, idx) => (
+                      <div key={idx} className="flex items-center gap-2 text-sm">
+                        <span className="text-stone-500 font-mono text-xs">{item.quantity}×</span>
+                        <span className="flex-1">{item.name}</span>
+                        <button onClick={() => void handleRemoveLoot(char, idx)} className="text-stone-700 hover:text-red-500 text-xs transition-colors">✕</button>
+                      </div>
+                    ))}
+                    {char.loot.length === 0 && <p className="text-xs text-stone-600 italic">No loot</p>}
+                    <div className="flex gap-2 pt-1">
+                      <input placeholder="Item name" value={lootInputs[char.id]?.name ?? ''}
+                        onChange={e => setLootInputs(p => ({ ...p, [char.id]: { ...p[char.id], name: e.target.value } }))}
+                        className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-amber-500" />
+                      <input type="number" min={1} placeholder="Qty" value={lootInputs[char.id]?.quantity ?? '1'}
+                        onChange={e => setLootInputs(p => ({ ...p, [char.id]: { ...p[char.id], quantity: e.target.value } }))}
+                        className="w-14 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm text-center font-mono focus:outline-none focus:border-amber-500" />
+                      <button onClick={() => void handleAddLoot(char)}
+                        className="bg-stone-700 hover:bg-stone-600 text-stone-200 text-sm px-3 py-1.5 rounded-lg transition-colors">
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Session Log Section ───────────────────────────────────────────────────────
+
+function SessionLogSection({ campaignId, notes, onRefresh }: {
+  campaignId: string; notes: SessionNote[]; onRefresh: () => void
+}) {
+  const [noteText, setNoteText] = useState('')
+
+  async function handleAdd() {
+    if (!noteText.trim()) return
+    await fetch('/api/world/session-notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId, note: noteText.trim() }),
+    })
+    setNoteText(''); onRefresh()
+  }
+
+  async function handleDelete(id: string) {
+    await fetch(`/api/world/session-notes/${id}`, { method: 'DELETE' })
+    onRefresh()
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <textarea
+          placeholder="Add a session note…"
+          value={noteText}
+          onChange={e => setNoteText(e.target.value)}
+          rows={3}
+          className="w-full bg-stone-900 border border-stone-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500 resize-none"
+        />
+        <button onClick={() => void handleAdd()} disabled={!noteText.trim()}
+          className="bg-amber-700 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+          Add Note
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {notes.length === 0 && <p className="text-xs text-stone-600 italic">No notes yet.</p>}
+        {notes.map(n => (
+          <div key={n.id} className="bg-stone-900 border border-stone-800 rounded-xl px-4 py-3 flex gap-3">
+            <div className="flex-1">
+              <p className="text-sm text-stone-200 whitespace-pre-wrap">{n.note}</p>
+              <p className="text-xs text-stone-600 mt-2">
+                {new Date(n.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </div>
+            <button onClick={() => void handleDelete(n.id)} className="text-stone-700 hover:text-red-500 text-xs shrink-0 transition-colors">✕</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Type guards ───────────────────────────────────────────────────────────────
 
+function isNpcsResponse(v: unknown): v is { npcs: Npc[] } {
+  return typeof v === 'object' && v !== null && 'npcs' in v && Array.isArray((v as Record<string, unknown>).npcs)
+}
+function isLocationsResponse(v: unknown): v is { locations: Location[] } {
+  return typeof v === 'object' && v !== null && 'locations' in v && Array.isArray((v as Record<string, unknown>).locations)
+}
+function isSessionNotesResponse(v: unknown): v is { notes: SessionNote[] } {
+  return typeof v === 'object' && v !== null && 'notes' in v && Array.isArray((v as Record<string, unknown>).notes)
+}
+function isInventoryResponse(v: unknown): v is { gold: number; sharedItems: InventoryItem[] } {
+  return typeof v === 'object' && v !== null && 'gold' in v && 'sharedItems' in v
+}
 function isRosterResponse(v: unknown): v is { characters: Character[] } {
   return typeof v === 'object' && v !== null && 'characters' in v && Array.isArray((v as Record<string, unknown>).characters)
 }

@@ -9,9 +9,55 @@ export interface Condition {
   roundsRemaining: number | null  // null = indefinite
 }
 
+export interface NpcRelationship {
+  characterId: string
+  relationship: string
+}
+
+export interface Npc {
+  id: string
+  campaignId: string
+  name: string
+  faction: string | null
+  lastLocation: string | null
+  notes: string | null
+  relationships: NpcRelationship[]
+  createdAt: Date
+}
+
+export interface Location {
+  id: string
+  campaignId: string
+  name: string
+  visited: boolean
+  notes: string | null
+  createdAt: Date
+}
+
+export interface InventoryItem {
+  name: string
+  quantity: number
+  notes: string | null
+}
+
+export interface LootItem {
+  name: string
+  quantity: number
+  notes: string | null
+}
+
+export interface SessionNote {
+  id: string
+  campaignId: string
+  note: string
+  createdAt: Date
+}
+
 export interface Campaign {
   id: string
   code: string
+  gold: number
+  sharedItems: InventoryItem[]
   createdAt: Date
   lastActiveAt: Date
   expiresAt: Date
@@ -68,6 +114,7 @@ export interface Character {
   deathSaves: DeathSaves
   spellSlots: SpellSlot[]
   conditions: Condition[]
+  loot: LootItem[]
   pushSubscription: PushSubscriptionJSON | null
   isActive: boolean
   createdAt: Date

@@ -94,16 +94,84 @@ import { RevealFateHandler } from '@/managers/fate/handlers/RevealFateHandler'
 import { GetFateLogHandler, GetPendingFateHandler } from '@/managers/fate/handlers/GetFateLogHandler'
 import { DrawFateRequest, RevealFateRequest, GetFateLogRequest, GetPendingFateRequest } from '@/managers/fate/FateRequests'
 
+// Accessors — World
+import { WorldAccessor } from '@/accessors/world/WorldAccessor'
+import { StoreNpcHandler } from '@/accessors/world/handlers/StoreNpcHandler'
+import { UpdateNpcHandler } from '@/accessors/world/handlers/UpdateNpcHandler'
+import { StoreLocationHandler } from '@/accessors/world/handlers/StoreLocationHandler'
+import { UpdateLocationHandler } from '@/accessors/world/handlers/UpdateLocationHandler'
+import { StoreSessionNoteHandler } from '@/accessors/world/handlers/StoreSessionNoteHandler'
+import { UpdateCampaignInventoryHandler } from '@/accessors/world/handlers/UpdateCampaignInventoryHandler'
+import { UpdateCharacterLootHandler as AccessorUpdateCharacterLootHandler } from '@/accessors/world/handlers/UpdateCharacterLootHandler'
+import { LoadNpcsHandler } from '@/accessors/world/handlers/LoadNpcsHandler'
+import { LoadLocationsHandler } from '@/accessors/world/handlers/LoadLocationsHandler'
+import { LoadSessionNotesHandler } from '@/accessors/world/handlers/LoadSessionNotesHandler'
+import { LoadCampaignInventoryHandler } from '@/accessors/world/handlers/LoadCampaignInventoryHandler'
+import { RemoveNpcHandler } from '@/accessors/world/handlers/RemoveNpcHandler'
+import { RemoveLocationHandler } from '@/accessors/world/handlers/RemoveLocationHandler'
+import { RemoveSessionNoteHandler } from '@/accessors/world/handlers/RemoveSessionNoteHandler'
+import {
+  StoreNpcRequest,
+  UpdateNpcRequest,
+  StoreLocationRequest,
+  UpdateLocationRequest as AccessorUpdateLocationRequest,
+  StoreSessionNoteRequest,
+  UpdateCampaignInventoryRequest,
+  UpdateCharacterLootRequest as AccessorUpdateCharacterLootRequest,
+  LoadNpcsRequest,
+  LoadLocationsRequest,
+  LoadSessionNotesRequest,
+  LoadCampaignInventoryRequest,
+  RemoveNpcRequest,
+  RemoveLocationRequest,
+  RemoveSessionNoteRequest,
+} from '@/accessors/world/WorldRequests'
+
+// Managers — World
+import { WorldManager } from '@/managers/world/WorldManager'
+import { AddNpcHandler } from '@/managers/world/handlers/AddNpcHandler'
+import { EditNpcHandler } from '@/managers/world/handlers/EditNpcHandler'
+import { DeleteNpcHandler } from '@/managers/world/handlers/DeleteNpcHandler'
+import { AddLocationHandler } from '@/managers/world/handlers/AddLocationHandler'
+import { UpdateLocationHandler as ManagerUpdateLocationHandler } from '@/managers/world/handlers/UpdateLocationHandler'
+import { DeleteLocationHandler } from '@/managers/world/handlers/DeleteLocationHandler'
+import { AddSessionNoteHandler } from '@/managers/world/handlers/AddSessionNoteHandler'
+import { DeleteSessionNoteHandler } from '@/managers/world/handlers/DeleteSessionNoteHandler'
+import { UpdateInventoryHandler } from '@/managers/world/handlers/UpdateInventoryHandler'
+import { UpdateCharacterLootHandler as ManagerUpdateCharacterLootHandler } from '@/managers/world/handlers/UpdateCharacterLootHandler'
+import { GetNpcsHandler } from '@/managers/world/handlers/GetNpcsHandler'
+import { GetLocationsHandler } from '@/managers/world/handlers/GetLocationsHandler'
+import { GetSessionNotesHandler } from '@/managers/world/handlers/GetSessionNotesHandler'
+import { GetInventoryHandler } from '@/managers/world/handlers/GetInventoryHandler'
+import {
+  AddNpcRequest,
+  EditNpcRequest,
+  DeleteNpcRequest,
+  AddLocationRequest,
+  UpdateLocationRequest as ManagerUpdateLocationRequest,
+  DeleteLocationRequest,
+  AddSessionNoteRequest,
+  DeleteSessionNoteRequest,
+  UpdateInventoryRequest,
+  UpdateCharacterLootRequest as ManagerUpdateCharacterLootRequest,
+  GetNpcsRequest,
+  GetLocationsRequest,
+  GetSessionNotesRequest,
+  GetInventoryRequest,
+} from '@/managers/world/WorldRequests'
+
 import type { ICampaignManager } from '@/managers/campaign/ICampaignManager'
 import type { IFateManager } from '@/managers/fate/IFateManager'
 import type { ICharacterManager } from '@/managers/character/ICharacterManager'
 import type { ICombatManager } from '@/managers/combat/ICombatManager'
+import type { IWorldManager } from '@/managers/world/IWorldManager'
 
 export interface Container {
   campaignManager: ICampaignManager
   fateManager: IFateManager
   characterManager: ICharacterManager
   combatManager: ICombatManager
+  worldManager: IWorldManager
 }
 
 export function createContainer(): Container {
@@ -215,5 +283,49 @@ export function createContainer(): Container {
       .build(),
   )
 
-  return { campaignManager, fateManager, characterManager, combatManager }
+  const worldAccessor = new WorldAccessor(
+    new HandlerResolverBuilder()
+      .register(StoreNpcRequest, new StoreNpcHandler(db))
+      .register(UpdateNpcRequest, new UpdateNpcHandler(db))
+      .register(StoreLocationRequest, new StoreLocationHandler(db))
+      .register(AccessorUpdateLocationRequest, new UpdateLocationHandler(db))
+      .register(StoreSessionNoteRequest, new StoreSessionNoteHandler(db))
+      .register(UpdateCampaignInventoryRequest, new UpdateCampaignInventoryHandler(db))
+      .register(AccessorUpdateCharacterLootRequest, new AccessorUpdateCharacterLootHandler(db))
+      .build(),
+    new HandlerResolverBuilder()
+      .register(LoadNpcsRequest, new LoadNpcsHandler(db))
+      .register(LoadLocationsRequest, new LoadLocationsHandler(db))
+      .register(LoadSessionNotesRequest, new LoadSessionNotesHandler(db))
+      .register(LoadCampaignInventoryRequest, new LoadCampaignInventoryHandler(db))
+      .build(),
+    new HandlerResolverBuilder()
+      .register(RemoveNpcRequest, new RemoveNpcHandler(db))
+      .register(RemoveLocationRequest, new RemoveLocationHandler(db))
+      .register(RemoveSessionNoteRequest, new RemoveSessionNoteHandler(db))
+      .build(),
+  )
+
+  const worldManager = new WorldManager(
+    new HandlerResolverBuilder()
+      .register(AddNpcRequest, new AddNpcHandler(worldAccessor))
+      .register(EditNpcRequest, new EditNpcHandler(worldAccessor))
+      .register(DeleteNpcRequest, new DeleteNpcHandler(worldAccessor))
+      .register(AddLocationRequest, new AddLocationHandler(worldAccessor))
+      .register(ManagerUpdateLocationRequest, new ManagerUpdateLocationHandler(worldAccessor))
+      .register(DeleteLocationRequest, new DeleteLocationHandler(worldAccessor))
+      .register(AddSessionNoteRequest, new AddSessionNoteHandler(worldAccessor))
+      .register(DeleteSessionNoteRequest, new DeleteSessionNoteHandler(worldAccessor))
+      .register(UpdateInventoryRequest, new UpdateInventoryHandler(worldAccessor))
+      .register(ManagerUpdateCharacterLootRequest, new ManagerUpdateCharacterLootHandler(worldAccessor))
+      .build(),
+    new HandlerResolverBuilder()
+      .register(GetNpcsRequest, new GetNpcsHandler(worldAccessor))
+      .register(GetLocationsRequest, new GetLocationsHandler(worldAccessor))
+      .register(GetSessionNotesRequest, new GetSessionNotesHandler(worldAccessor))
+      .register(GetInventoryRequest, new GetInventoryHandler(worldAccessor))
+      .build(),
+  )
+
+  return { campaignManager, fateManager, characterManager, combatManager, worldManager }
 }

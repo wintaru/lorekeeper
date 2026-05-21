@@ -1,0 +1,54 @@
+import { NextResponse } from 'next/server'
+import { createContainer } from '@/container/DependencyContainer'
+import { GetNpcsRequest, AddNpcRequest } from '@/managers/world/WorldRequests'
+import type { GetNpcsResponse, NpcResponse } from '@/managers/world/WorldResponses'
+import type { NpcRelationship } from '@/types'
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const campaignId = searchParams.get('campaignId')
+  if (!campaignId) return NextResponse.json({ error: 'campaignId is required' }, { status: 400 })
+
+  const { worldManager } = createContainer()
+  const result = (await worldManager.query(new GetNpcsRequest(campaignId))) as GetNpcsResponse
+
+  return NextResponse.json({ npcs: result.npcs })
+}
+
+export async function POST(request: Request) {
+  const body: unknown = await request.json()
+  if (!isAddNpcBody(body)) {
+    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+  }
+
+  const { worldManager } = createContainer()
+  const result = (await worldManager.execute(
+    new AddNpcRequest(
+      body.campaignId,
+      body.name,
+      body.faction ?? null,
+      body.lastLocation ?? null,
+      body.notes ?? null,
+      body.relationships ?? [],
+    )
+  )) as NpcResponse
+
+  if (!result.success || !result.npc) {
+    return NextResponse.json({ error: result.errorMessage }, { status: 400 })
+  }
+
+  return NextResponse.json({ npc: result.npc }, { status: 201 })
+}
+
+function isAddNpcBody(value: unknown): value is {
+  campaignId: string
+  name: string
+  faction?: string | null
+  lastLocation?: string | null
+  notes?: string | null
+  relationships?: NpcRelationship[]
+} {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return typeof v.campaignId === 'string' && typeof v.name === 'string'
+}

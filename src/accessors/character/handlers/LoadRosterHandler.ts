@@ -40,6 +40,7 @@ function rowToCharacter(row: Record<string, unknown>): Character {
     deathSaves: (row.death_saves as Character['deathSaves']) ?? { successes: 0, failures: 0 },
     spellSlots: (row.spell_slots as Character['spellSlots']) ?? [],
     conditions: (row.conditions as Character['conditions']) ?? [],
+    loot: (row.loot as Character['loot']) ?? [],
     pushSubscription: (row.push_subscription as Character['pushSubscription']) ?? null,
     isActive: row.is_active as boolean,
     createdAt: new Date(row.created_at as string),

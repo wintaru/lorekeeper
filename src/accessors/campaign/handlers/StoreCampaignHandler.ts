@@ -4,7 +4,7 @@ import type { ResponseBase } from '@/common/ResponseBase'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { StoreCampaignRequest } from '../CampaignRequests'
 import { StoreCampaignResponse } from '../CampaignResponses'
-import type { Campaign } from '@/types'
+import type { Campaign, InventoryItem } from '@/types'
 
 export class StoreCampaignHandler implements IHandler {
   constructor(private readonly db: SupabaseClient) {}
@@ -24,6 +24,8 @@ export class StoreCampaignHandler implements IHandler {
     const campaign: Campaign = {
       id: data.id,
       code: data.code,
+      gold: (data.gold as number) ?? 0,
+      sharedItems: (data.shared_items as InventoryItem[]) ?? [],
       createdAt: new Date(data.created_at),
       lastActiveAt: new Date(data.last_active_at),
       expiresAt: new Date(data.expires_at),

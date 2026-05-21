@@ -1,0 +1,24 @@
+import type { IHandler } from '@/common/resolver/IHandler'
+import type { RequestBase } from '@/common/RequestBase'
+import type { ResponseBase } from '@/common/ResponseBase'
+import type { IWorldAccessor } from '@/accessors/world/IWorldAccessor'
+import { StoreLocationRequest } from '@/accessors/world/WorldRequests'
+import { StoreLocationResponse } from '@/accessors/world/WorldResponses'
+import { AddLocationRequest } from '../WorldRequests'
+import { LocationResponse } from '../WorldResponses'
+
+export class AddLocationHandler implements IHandler {
+  constructor(private readonly worldAccessor: IWorldAccessor) {}
+
+  async handle(request: RequestBase): Promise<ResponseBase> {
+    const req = request as AddLocationRequest
+    const result = (await this.worldAccessor.store(
+      new StoreLocationRequest(req.campaignId, req.name)
+    )) as StoreLocationResponse
+
+    if (!result.success || !result.location) {
+      return new LocationResponse(req.correlationId, null, result.errorMessage ?? 'Failed to add location')
+    }
+    return new LocationResponse(req.correlationId, result.location)
+  }
+}
