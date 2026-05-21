@@ -43,3 +43,42 @@ export class UpdateCharacterResponse extends ResponseBase {
     this.errorMessage = errorMessage ?? null
   }
 }
+
+export class UpdateConditionsResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+
+  constructor(correlationId: string, success: boolean, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.success = success
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class UpdateDeathSavesResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+
+  constructor(correlationId: string, success: boolean, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.success = success
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class UpdateSpellSlotsResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+
+  constructor(correlationId: string, success: boolean, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.success = success
+    this.errorMessage = errorMessage ?? null
+  }
+}

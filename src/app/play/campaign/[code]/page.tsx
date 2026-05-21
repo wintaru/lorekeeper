@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Character, FateEvent, FateEventType } from '@/types'
@@ -198,6 +198,61 @@ export default function PlayerCampaignPage() {
           </div>
         )}
 
+        {/* Death saves — only when downed */}
+        {character.currentHp === 0 && (
+          <div className="bg-stone-900 border border-red-900/50 rounded-xl p-4">
+            <p className="text-xs text-red-400 uppercase tracking-widest mb-3">Death Saves</p>
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-emerald-500">Successes</span>
+                {[0, 1, 2].map(i => (
+                  <button key={i}
+                    onClick={() => void updateDeathSave(character.id, 'success', character.deathSaves, setCharacter)}
+                    className={`w-7 h-7 rounded-full border-2 transition-colors ${i < character.deathSaves.successes ? 'bg-emerald-500 border-emerald-400' : 'border-stone-600 bg-stone-800'}`}
+                  />
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-red-500">Failures</span>
+                {[0, 1, 2].map(i => (
+                  <button key={i}
+                    onClick={() => void updateDeathSave(character.id, 'failure', character.deathSaves, setCharacter)}
+                    className={`w-7 h-7 rounded-full border-2 transition-colors ${i < character.deathSaves.failures ? 'bg-red-500 border-red-400' : 'border-stone-600 bg-stone-800'}`}
+                  />
+                ))}
+              </div>
+            </div>
+            {character.deathSaves.successes >= 3 && <p className="text-emerald-400 text-sm mt-3 font-medium">You are stable.</p>}
+            {character.deathSaves.failures >= 3 && <p className="text-red-400 text-sm mt-3 font-medium">You have fallen.</p>}
+          </div>
+        )}
+
+        {/* Spell slots */}
+        {character.spellSlots.length > 0 && (
+          <div className="bg-stone-900 border border-stone-800 rounded-xl p-4">
+            <p className="text-xs text-stone-500 uppercase tracking-widest mb-3">Spell Slots</p>
+            <div className="space-y-2">
+              {character.spellSlots.map(slot => (
+                <div key={slot.level} className="flex items-center gap-3">
+                  <span className="text-stone-500 text-xs w-12 shrink-0">Level {slot.level}</span>
+                  <div className="flex gap-1.5">
+                    {Array.from({ length: slot.total }).map((_, i) => {
+                      const isUsed = i < slot.used
+                      return (
+                        <button key={i}
+                          onClick={() => void toggleSpellSlot(character.id, slot.level, i, character.spellSlots, setCharacter)}
+                          className={`w-6 h-6 rounded-full border-2 transition-colors ${isUsed ? 'border-stone-600 bg-stone-800' : 'border-violet-500 bg-violet-900/50'}`}
+                        />
+                      )
+                    })}
+                  </div>
+                  <span className="text-xs text-stone-500 tabular-nums">{slot.total - slot.used}/{slot.total}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {fateLog.length > 0 && (
           <div className="space-y-2">
             <p className="text-xs text-stone-500 uppercase tracking-widest">Fate History</p>
@@ -216,6 +271,44 @@ export default function PlayerCampaignPage() {
       </div>
     </main>
   )
+}
+
+async function updateDeathSave(
+  characterId: string,
+  type: 'success' | 'failure',
+  current: Character['deathSaves'],
+  setCharacter: React.Dispatch<React.SetStateAction<Character | null>>,
+) {
+  const deathSaves = {
+    successes: type === 'success' ? Math.min(3, current.successes + 1) : current.successes,
+    failures: type === 'failure' ? Math.min(3, current.failures + 1) : current.failures,
+  }
+  await fetch('/api/characters/death-saves', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ characterId, deathSaves }),
+  })
+  setCharacter(prev => prev ? { ...prev, deathSaves } : prev)
+}
+
+async function toggleSpellSlot(
+  characterId: string,
+  level: number,
+  slotIndex: number,
+  currentSlots: Character['spellSlots'],
+  setCharacter: React.Dispatch<React.SetStateAction<Character | null>>,
+) {
+  const spellSlots = currentSlots.map(s => {
+    if (s.level !== level) return s
+    const isUsed = slotIndex < s.used
+    return { ...s, used: isUsed ? Math.max(0, s.used - 1) : Math.min(s.total, s.used + 1) }
+  })
+  await fetch('/api/characters/spell-slots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ characterId, spellSlots }),
+  })
+  setCharacter(prev => prev ? { ...prev, spellSlots } : prev)
 }
 
 async function subscribeToPush(
@@ -272,6 +365,7 @@ function rowToCharacter(row: Record<string, unknown>): Character {
     maxHp: row.max_hp as number,
     currentHp: row.current_hp as number,
     armorClass: row.armor_class as number,
+    deathSaves: (row.death_saves as Character['deathSaves']) ?? { successes: 0, failures: 0 },
     spellSlots: (row.spell_slots as Character['spellSlots']) ?? [],
     conditions: (row.conditions as Character['conditions']) ?? [],
     pushSubscription: (row.push_subscription as Character['pushSubscription']) ?? null,

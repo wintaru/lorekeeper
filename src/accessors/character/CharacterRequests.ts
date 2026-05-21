@@ -1,5 +1,5 @@
 import { RequestBase } from '@/common/RequestBase'
-import type { SpellSlot, Condition } from '@/types'
+import type { SpellSlot, Condition, DeathSaves } from '@/types'
 
 export class StoreCharacterRequest extends RequestBase {
   constructor(
@@ -29,5 +29,19 @@ export class UpdateCharacterConditionsRequest extends RequestBase {
   constructor(
     public readonly characterId: string,
     public readonly conditions: Condition[],
+  ) { super() }
+}
+
+export class UpdateDeathSavesRequest extends RequestBase {
+  constructor(
+    public readonly characterId: string,
+    public readonly deathSaves: DeathSaves,
+  ) { super() }
+}
+
+export class UpdateSpellSlotsRequest extends RequestBase {
+  constructor(
+    public readonly characterId: string,
+    public readonly spellSlots: SpellSlot[],
   ) { super() }
 }

@@ -37,6 +37,7 @@ function rowToCharacter(row: Record<string, unknown>): Character {
     maxHp: row.max_hp as number,
     currentHp: row.current_hp as number,
     armorClass: row.armor_class as number,
+    deathSaves: (row.death_saves as Character['deathSaves']) ?? { successes: 0, failures: 0 },
     spellSlots: (row.spell_slots as Character['spellSlots']) ?? [],
     conditions: (row.conditions as Character['conditions']) ?? [],
     pushSubscription: (row.push_subscription as Character['pushSubscription']) ?? null,

@@ -12,7 +12,28 @@ import { CharacterAccessor } from '@/accessors/character/CharacterAccessor'
 import { StoreCharacterHandler } from '@/accessors/character/handlers/StoreCharacterHandler'
 import { LoadRosterHandler } from '@/accessors/character/handlers/LoadRosterHandler'
 import { UpdateCharacterHpHandler } from '@/accessors/character/handlers/UpdateCharacterHpHandler'
-import { StoreCharacterRequest, LoadRosterRequest, UpdateCharacterHpRequest } from '@/accessors/character/CharacterRequests'
+import { UpdateConditionsHandler as AccessorUpdateConditionsHandler } from '@/accessors/character/handlers/UpdateConditionsHandler'
+import { UpdateDeathSavesHandler as AccessorUpdateDeathSavesHandler } from '@/accessors/character/handlers/UpdateDeathSavesHandler'
+import { UpdateSpellSlotsHandler as AccessorUpdateSpellSlotsHandler } from '@/accessors/character/handlers/UpdateSpellSlotsHandler'
+import {
+  StoreCharacterRequest,
+  LoadRosterRequest,
+  UpdateCharacterHpRequest,
+  UpdateCharacterConditionsRequest,
+  UpdateDeathSavesRequest as AccessorUpdateDeathSavesRequest,
+  UpdateSpellSlotsRequest as AccessorUpdateSpellSlotsRequest,
+} from '@/accessors/character/CharacterRequests'
+
+// Accessors — Combat
+import { CombatAccessor } from '@/accessors/combat/CombatAccessor'
+import { StoreCombatSessionHandler } from '@/accessors/combat/handlers/StoreCombatSessionHandler'
+import { LoadCombatSessionHandler } from '@/accessors/combat/handlers/LoadCombatSessionHandler'
+import { UpdateCombatSessionHandler } from '@/accessors/combat/handlers/UpdateCombatSessionHandler'
+import {
+  StoreCombatSessionRequest,
+  LoadCombatSessionRequest,
+  UpdateCombatSessionRequest,
+} from '@/accessors/combat/CombatRequests'
 
 // Accessors — Fate
 import { FateAccessor } from '@/accessors/fate/FateAccessor'
@@ -40,6 +61,32 @@ import { GetRosterHandler } from '@/managers/campaign/handlers/GetRosterHandler'
 import { ValidateDmPinHandler } from '@/managers/campaign/handlers/ValidateDmPinHandler'
 import { CreateCampaignRequest, JoinCampaignRequest, GetRosterRequest, ValidateDmPinRequest } from '@/managers/campaign/CampaignRequests'
 
+// Managers — Character
+import { CharacterManager } from '@/managers/character/CharacterManager'
+import { UpdateHpHandler } from '@/managers/character/handlers/UpdateHpHandler'
+import { UpdateConditionsHandler as ManagerUpdateConditionsHandler } from '@/managers/character/handlers/UpdateConditionsHandler'
+import { UpdateDeathSavesHandler as ManagerUpdateDeathSavesHandler } from '@/managers/character/handlers/UpdateDeathSavesHandler'
+import { UpdateSpellSlotsHandler as ManagerUpdateSpellSlotsHandler } from '@/managers/character/handlers/UpdateSpellSlotsHandler'
+import {
+  UpdateHpRequest,
+  UpdateConditionsRequest,
+  UpdateDeathSavesRequest,
+  UpdateSpellSlotsRequest,
+} from '@/managers/character/CharacterRequests'
+
+// Managers — Combat
+import { CombatManager } from '@/managers/combat/CombatManager'
+import { StartCombatHandler } from '@/managers/combat/handlers/StartCombatHandler'
+import { EndCombatHandler } from '@/managers/combat/handlers/EndCombatHandler'
+import { NextTurnHandler } from '@/managers/combat/handlers/NextTurnHandler'
+import { GetCombatSessionHandler } from '@/managers/combat/handlers/GetCombatSessionHandler'
+import {
+  StartCombatRequest,
+  EndCombatRequest,
+  NextTurnRequest,
+  GetCombatSessionRequest,
+} from '@/managers/combat/CombatRequests'
+
 // Managers — Fate
 import { FateManager } from '@/managers/fate/FateManager'
 import { DrawFateHandler } from '@/managers/fate/handlers/DrawFateHandler'
@@ -49,10 +96,14 @@ import { DrawFateRequest, RevealFateRequest, GetFateLogRequest, GetPendingFateRe
 
 import type { ICampaignManager } from '@/managers/campaign/ICampaignManager'
 import type { IFateManager } from '@/managers/fate/IFateManager'
+import type { ICharacterManager } from '@/managers/character/ICharacterManager'
+import type { ICombatManager } from '@/managers/combat/ICombatManager'
 
 export interface Container {
   campaignManager: ICampaignManager
   fateManager: IFateManager
+  characterManager: ICharacterManager
+  combatManager: ICombatManager
 }
 
 export function createContainer(): Container {
@@ -73,9 +124,22 @@ export function createContainer(): Container {
     new HandlerResolverBuilder()
       .register(StoreCharacterRequest, new StoreCharacterHandler(db))
       .register(UpdateCharacterHpRequest, new UpdateCharacterHpHandler(db))
+      .register(UpdateCharacterConditionsRequest, new AccessorUpdateConditionsHandler(db))
+      .register(AccessorUpdateDeathSavesRequest, new AccessorUpdateDeathSavesHandler(db))
+      .register(AccessorUpdateSpellSlotsRequest, new AccessorUpdateSpellSlotsHandler(db))
       .build(),
     new HandlerResolverBuilder()
       .register(LoadRosterRequest, new LoadRosterHandler(db))
+      .build(),
+  )
+
+  const combatAccessor = new CombatAccessor(
+    new HandlerResolverBuilder()
+      .register(StoreCombatSessionRequest, new StoreCombatSessionHandler(db))
+      .register(UpdateCombatSessionRequest, new UpdateCombatSessionHandler(db))
+      .build(),
+    new HandlerResolverBuilder()
+      .register(LoadCombatSessionRequest, new LoadCombatSessionHandler(db))
       .build(),
   )
 
@@ -120,6 +184,26 @@ export function createContainer(): Container {
       .build(),
   )
 
+  const characterManager = new CharacterManager(
+    new HandlerResolverBuilder()
+      .register(UpdateHpRequest, new UpdateHpHandler(characterAccessor))
+      .register(UpdateConditionsRequest, new ManagerUpdateConditionsHandler(characterAccessor))
+      .register(UpdateDeathSavesRequest, new ManagerUpdateDeathSavesHandler(characterAccessor))
+      .register(UpdateSpellSlotsRequest, new ManagerUpdateSpellSlotsHandler(characterAccessor))
+      .build(),
+  )
+
+  const combatManager = new CombatManager(
+    new HandlerResolverBuilder()
+      .register(StartCombatRequest, new StartCombatHandler(combatAccessor))
+      .register(EndCombatRequest, new EndCombatHandler(combatAccessor))
+      .register(NextTurnRequest, new NextTurnHandler(combatAccessor))
+      .build(),
+    new HandlerResolverBuilder()
+      .register(GetCombatSessionRequest, new GetCombatSessionHandler(combatAccessor))
+      .build(),
+  )
+
   const fateManager = new FateManager(
     new HandlerResolverBuilder()
       .register(DrawFateRequest, new DrawFateHandler(fateEngine, fateAccessor, characterAccessor, notificationAccessor))
@@ -131,5 +215,5 @@ export function createContainer(): Container {
       .build(),
   )
 
-  return { campaignManager, fateManager }
+  return { campaignManager, fateManager, characterManager, combatManager }
 }

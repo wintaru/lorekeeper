@@ -34,6 +34,27 @@ export interface FatePoolEntry {
   weight: number
 }
 
+export interface DeathSaves {
+  successes: number
+  failures: number
+}
+
+export interface InitiativeEntry {
+  characterId: string
+  initiative: number
+  name: string
+}
+
+export interface CombatSession {
+  id: string
+  campaignId: string
+  initiativeOrder: InitiativeEntry[]
+  currentTurnIndex: number
+  roundNumber: number
+  isActive: boolean
+  createdAt: Date
+}
+
 export interface Character {
   id: string
   campaignId: string
@@ -44,6 +65,7 @@ export interface Character {
   maxHp: number
   currentHp: number
   armorClass: number
+  deathSaves: DeathSaves
   spellSlots: SpellSlot[]
   conditions: Condition[]
   pushSubscription: PushSubscriptionJSON | null
