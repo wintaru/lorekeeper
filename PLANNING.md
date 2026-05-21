@@ -49,6 +49,21 @@ graph TD
 
 ---
 
+## DM Control Panel
+
+The DM campaign view is a single unified screen — not separate pages for each feature. It consolidates everything the DM needs at the table into one place, organized into sections or tabs:
+
+| Section | What's there |
+|---|---|
+| **Roster** | All characters — HP bars, conditions, AC, real-time sync |
+| **Combat** | Initiative order, active turn indicator, round counter, HP adjustments |
+| **Fate Engine** | Draw fate, set weights, Reveal button, fate log |
+| **World** | Quick-access NPC notes, session log (Phase 4) |
+
+The Roster section exists today (Phase 1). Each subsequent phase plugs into this panel rather than creating new pages.
+
+---
+
 ## Phase 3 — Combat Layer
 
 | Feature | Notes |
