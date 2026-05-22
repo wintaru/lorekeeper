@@ -342,7 +342,7 @@ export default function PlayerCampaignPage() {
           const entries: LogEntry[] = [
             ...whispers.map(w => ({ kind: 'whisper' as const, id: w.id, message: w.message, createdAt: w.createdAt })),
             ...fateLog.map(e => ({ kind: 'fate' as const, id: e.id, eventType: e.eventType, createdAt: e.createdAt })),
-          ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
           return (
             <div className="space-y-2">
@@ -365,7 +365,7 @@ export default function PlayerCampaignPage() {
                     </div>
                   )}
                   <span className="text-stone-600 text-xs shrink-0 mt-0.5">
-                    {entry.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
               ))}
