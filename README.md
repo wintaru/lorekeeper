@@ -4,142 +4,296 @@ A PWA DM companion app for D&D. Players join campaigns by code — no accounts r
 
 ---
 
-## Prerequisites
+## Before You Start
 
-### 1. Node.js 18+
+This guide walks you through every step from a fresh computer to a running app. You don't need to know how to code — just follow each step in order.
 
-Download from [nodejs.org](https://nodejs.org) or install via a version manager:
+You'll be typing commands into a **terminal** (also called a command prompt). Here's how to open one:
 
-```bash
-# Homebrew (macOS)
-brew install node
+- **macOS:** Press `Command + Space`, type `Terminal`, press Enter
+- **Windows:** Press `Windows + R`, type `cmd`, press Enter (or search for "Command Prompt" in the Start menu)
 
-# nvm (any OS)
-nvm install 20
-nvm use 20
+When a step shows a command in a grey box like this:
+```
+npm install
+```
+Type it exactly as shown and press Enter. Wait for it to finish before moving to the next step.
+
+---
+
+## Step 1 — Install Git
+
+Git is a tool for downloading code from the internet.
+
+**macOS:**
+1. Open Terminal
+2. Type `git --version` and press Enter
+3. If it prints a version number, Git is already installed — skip to Step 2
+4. If it prompts you to install "Command Line Tools", click Install and wait for it to finish
+
+**Windows:**
+1. Go to [git-scm.com/download/win](https://git-scm.com/download/win)
+2. Download and run the installer — the default options are fine
+3. Open a new Command Prompt window after installing
+
+---
+
+## Step 2 — Install Node.js
+
+Node.js is the engine that runs the app.
+
+1. Go to [nodejs.org](https://nodejs.org)
+2. Click the button labeled **LTS** (the recommended version)
+3. Run the downloaded installer — the default options are fine
+4. Close and reopen your terminal window
+5. Verify the install worked:
+   ```
+   node --version
+   ```
+   You should see a version number like `v20.x.x`.
+
+---
+
+## Step 3 — Install Docker Desktop
+
+Docker runs the local database (Supabase) on your machine.
+
+1. Go to [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
+2. Click **Download Docker Desktop** for your operating system
+3. Run the installer — the default options are fine
+4. Launch Docker Desktop after installation
+5. Wait until the whale icon in your menu bar (macOS) or system tray (Windows) stops animating — this means Docker is ready
+6. Verify it's running:
+   ```
+   docker --version
+   ```
+
+> **Important:** Docker Desktop must be running any time you work on the app. If your computer restarts, open Docker Desktop again before continuing.
+
+---
+
+## Step 4 — Install the Supabase CLI
+
+The Supabase CLI manages your local database.
+
+**macOS (using Homebrew):**
+
+First check if Homebrew is installed:
+```
+brew --version
+```
+If not, install it by running this command (copy the whole thing):
+```
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+Then install Supabase:
+```
+brew install supabase/tap/supabase
 ```
 
-### 2. Docker Desktop
-
-Required to run Supabase locally.
-
-1. Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
-2. Install and launch Docker Desktop
-3. Verify: `docker --version`
-
-### 3. Supabase CLI
-
-```bash
-# Homebrew (macOS/Linux)
-brew install supabase/tap/supabase
-
-# npm (any OS)
+**Windows / any OS (using npm):**
+```
 npm install -g supabase
+```
 
-# Verify
+Verify the install:
+```
 supabase --version
 ```
 
 ---
 
-## Local Development Setup
+## Step 5 — Download the Code
 
-### 1. Clone and install
+1. Open your terminal
+2. Navigate to where you want to put the project. For example, to put it in your Documents folder:
+   - **macOS:** `cd ~/Documents`
+   - **Windows:** `cd %USERPROFILE%\Documents`
+3. Download the code:
+   ```
+   git clone <repo-url>
+   ```
+   Replace `<repo-url>` with the actual URL of this repository.
+4. Move into the project folder:
+   ```
+   cd LoreKeeper
+   ```
+5. Install the app's dependencies (this may take a minute):
+   ```
+   npm install
+   ```
 
-```bash
-git clone <repo-url>
-cd LoreKeeper
-npm install
+---
+
+## Step 6 — Start the Local Database
+
+This step starts a local copy of the database on your machine. Docker Desktop must be open and running.
+
 ```
-
-### 2. Start local Supabase
-
-This spins up a full Supabase stack in Docker — Postgres, API, Realtime, Studio — and applies all migrations automatically.
-
-```bash
 supabase start
 ```
 
-First run pulls Docker images (~1 GB) and takes a few minutes. Subsequent starts are fast.
+The first time you run this it downloads some files (~1 GB) and takes a few minutes. You'll see a lot of output — this is normal. When it finishes, you'll see a summary of URLs.
 
-Once running, the local stack is available at:
-| Service | URL |
-|---|---|
-| **Studio (DB browser)** | **http://127.0.0.1:54333** |
-| API (use this for `SUPABASE_URL`) | http://127.0.0.1:54331 |
-| Database (direct Postgres) | postgresql://postgres:postgres@127.0.0.1:54332/postgres |
+Once running, you can open the database browser at **[http://127.0.0.1:54333](http://127.0.0.1:54333)** to see your tables and data.
 
-Open Studio to browse tables, run SQL, inspect Realtime events, and manage auth — it's the full Supabase dashboard running locally.
+> **Note:** If `supabase start` fails with a port conflict, see the [Troubleshooting](#troubleshooting) section below.
 
-> **Note:** This project runs on offset ports (5433x) because another Supabase project may already be using the default 5432x ports. If you have no other projects running, you can revert the ports in `supabase/config.toml`.
+---
 
-### 3. Set up environment variables
+## Step 7 — Create Your Environment File
 
-The local keys are pre-filled in `.env.local.example` — just copy it:
+The app needs a configuration file with connection details and security keys. Start by copying the example:
 
-```bash
+**macOS/Linux:**
+```
 cp .env.local.example .env.local
 ```
 
-The Supabase section is already filled in for local dev. You only need to add VAPID keys for Web Push:
+**Windows:**
+```
+copy .env.local.example .env.local
+```
 
-```bash
+The Supabase database settings are already filled in for local development. Now you need to add Web Push keys (these are required for the Fate Engine notifications).
+
+Run this command to generate a pair of keys:
+```
 npx web-push generate-vapid-keys
 ```
 
-Copy the output into `.env.local`:
+It will print something like:
+```
+Public Key:
+BFj3abc...long string of characters...
+
+Private Key:
+Kx9def...another long string...
+```
+
+Open `.env.local` in a text editor (Notepad on Windows, TextEdit on macOS, or any code editor) and replace the placeholder values at the bottom:
 
 ```
-NEXT_PUBLIC_VAPID_PUBLIC_KEY=<paste public key>
-VAPID_PRIVATE_KEY=<paste private key>
-VAPID_CONTACT_EMAIL=mailto:you@example.com
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=paste-your-public-key-here
+VAPID_PRIVATE_KEY=paste-your-private-key-here
+VAPID_CONTACT_EMAIL=mailto:your@email.com
 ```
 
-> **Push notifications in local dev:** Web Push requires HTTPS for real devices. For local testing on your own machine it will still work via `localhost`. To test on a phone, use a tunnel:
-> ```bash
-> npx localtunnel --port 3000
-> ```
+Replace `your@email.com` with your real email address (this is required by the push notification standard).
 
-### 4. Run the app
+Save the file.
 
-```bash
+---
+
+## Step 8 — Run the App
+
+```
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### 5. Stop Supabase when done
+You should see the LoreKeeper home page. To try it:
+- Go to `/dm/new` to create a campaign as the DM
+- Open a second browser tab or window and go to `/play` to join as a player using the campaign code
 
-```bash
+---
+
+## Stopping and Restarting
+
+When you're done working:
+```
 supabase stop
 ```
 
-Data is preserved between stops. To reset the database to a clean state:
+Your data is saved between stops. The next time you want to work on the app:
+1. Open Docker Desktop and wait for it to start
+2. In your terminal, navigate back to the project folder
+3. Run `supabase start`
+4. Run `npm run dev`
 
-```bash
+To wipe the database and start fresh:
+```
 supabase db reset
 ```
 
 ---
 
-## Database Migrations
+## Troubleshooting
 
-Migrations live in `supabase/migrations/`. When you add or change the schema:
+**`supabase start` says a port is already in use**
 
-```bash
-# Create a new migration file
-supabase migration new <description>
+Another process is using the same port. Check the port numbers in `supabase/config.toml` and change them to something free, or stop whatever is using those ports.
 
-# Apply all pending migrations locally
-supabase db reset
+**`npm install` fails with permission errors (macOS/Linux)**
 
-# Push to a hosted Supabase project
-supabase db push
+Do not use `sudo npm install`. Instead, fix npm's permissions by following the guide at [docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally).
+
+**The app opens but shows a database error**
+
+Make sure `supabase start` is running. Open a new terminal window and check:
 ```
+supabase status
+```
+If Supabase is not running, start it again.
+
+**Push notifications don't work in local dev**
+
+Browsers only allow push notifications on HTTPS — except for `localhost`, which works fine. If you want to test on your phone, run a tunnel:
+```
+npx localtunnel --port 3000
+```
+Use the URL it gives you instead of `localhost:3000`.
 
 ---
 
-## Project Structure
+## Deploying to the Internet (Optional)
+
+If you want to make the app publicly accessible, you'll need:
+1. A free [Supabase](https://supabase.com) account for the hosted database
+2. A free [Vercel](https://vercel.com) account for hosting
+
+### 1. Create a hosted Supabase project
+
+1. Sign up at [supabase.com](https://supabase.com) and create a new project
+2. Once created, go to **Settings → API** and copy your project URL and keys
+3. Push your database schema to the hosted project:
+   ```
+   supabase db push
+   ```
+   When prompted, link to your project using the URL shown in the Supabase dashboard.
+
+### 2. Deploy to Vercel
+
+1. Install the Vercel CLI:
+   ```
+   npm install -g vercel
+   ```
+2. Deploy:
+   ```
+   npx vercel
+   ```
+   Follow the prompts — it will ask you to log in the first time.
+
+3. In the [Vercel dashboard](https://vercel.com), open your project → **Settings → Environment Variables** and add:
+
+   | Variable | Where to find it |
+   |---|---|
+   | `NEXT_PUBLIC_SUPABASE_URL` | Supabase dashboard → Settings → API |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase dashboard → Settings → API |
+   | `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard → Settings → API |
+   | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Same value from your `.env.local` |
+   | `VAPID_PRIVATE_KEY` | Same value from your `.env.local` |
+   | `VAPID_CONTACT_EMAIL` | Your email |
+
+4. Redeploy after adding the variables:
+   ```
+   npx vercel --prod
+   ```
+
+---
+
+## Project Structure (for contributors)
 
 ```
 src/
@@ -164,46 +318,4 @@ supabase/
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full layer map, data models, and Fate Engine flow.
 See [PLANNING.md](PLANNING.md) for the feature roadmap and phase breakdown.
 
----
-
-## Architecture
-
 This project follows iDesign / volatility-based decomposition. Every component belongs to one layer (Client, Manager, Engine, Accessor, Utility) with strict call rules between them. Read [ARCHITECTURE.md](ARCHITECTURE.md) before writing new code.
-
-The short version:
-- **Clients** call Managers only
-- **Managers** orchestrate Engines and Accessors
-- **Engines** hold pure business logic (no I/O)
-- **Accessors** talk to Supabase and Web Push (no logic)
-- **Utilities** are stateless helpers anyone can call
-
-All operations use typed `Request` / `Response` objects. Layer implementations are thin shells that delegate to `HandlerResolver`. All logic lives in `handlers/` subdirectories.
-
----
-
-## Deployment
-
-Deploy to Vercel:
-
-```bash
-npx vercel
-```
-
-Set these environment variables in Vercel → Project → Settings → Environment Variables — use your **hosted Supabase project** values (not the local ones):
-
-| Variable | Where to find it |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase dashboard → Settings → API |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase dashboard → Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard → Settings → API |
-| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Same keys you generated locally |
-| `VAPID_PRIVATE_KEY` | Same keys you generated locally |
-| `VAPID_CONTACT_EMAIL` | Your email |
-
-Connect your domain under Vercel → Project → Domains.
-
-Push the schema to your hosted project:
-
-```bash
-supabase db push
-```
