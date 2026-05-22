@@ -15,3 +15,14 @@ export class StoreSubscriptionRequest extends RequestBase {
     public readonly subscription: PushSubscriptionJSON,
   ) { super() }
 }
+
+export class StoreWhisperRequest extends RequestBase {
+  constructor(
+    public readonly characterId: string,
+    public readonly message: string,
+  ) { super() }
+}
+
+export class LoadWhispersRequest extends RequestBase {
+  constructor(public readonly characterId: string) { super() }
+}

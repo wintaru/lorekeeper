@@ -185,6 +185,7 @@ function CharacterCard({ character: c, onRefresh }: { character: Character; onRe
   const [whisperText, setWhisperText] = useState('')
   const [showWhisper, setShowWhisper] = useState(false)
   const [whisperSent, setWhisperSent] = useState(false)
+  const [whisperError, setWhisperError] = useState(false)
 
   async function handleAwardXp() {
     const amount = parseInt(xpInput, 10)
@@ -199,13 +200,18 @@ function CharacterCard({ character: c, onRefresh }: { character: Character; onRe
 
   async function handleWhisper() {
     if (!whisperText.trim()) return
-    await fetch('/api/push/whisper', {
+    const res = await fetch('/api/push/whisper', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ characterId: c.id, message: whisperText.trim() }),
     })
-    setWhisperText(''); setWhisperSent(true)
-    setTimeout(() => { setWhisperSent(false); setShowWhisper(false) }, 2000)
+    if (res.ok) {
+      setWhisperText(''); setWhisperSent(true); setWhisperError(false)
+      setTimeout(() => { setWhisperSent(false); setShowWhisper(false) }, 2000)
+    } else {
+      setWhisperError(true)
+      setTimeout(() => setWhisperError(false), 3000)
+    }
   }
 
   return (
@@ -269,8 +275,8 @@ function CharacterCard({ character: c, onRefresh }: { character: Character; onRe
               onKeyDown={e => { if (e.key === 'Enter') void handleWhisper() }}
               className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-amber-500" />
             <button onClick={() => void handleWhisper()}
-              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${whisperSent ? 'bg-emerald-800 text-emerald-200' : 'bg-amber-700 hover:bg-amber-600 text-white'}`}>
-              {whisperSent ? 'Sent!' : 'Send'}
+              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${whisperSent ? 'bg-emerald-800 text-emerald-200' : whisperError ? 'bg-red-900 text-red-300' : 'bg-amber-700 hover:bg-amber-600 text-white'}`}>
+              {whisperSent ? 'Sent!' : whisperError ? 'Failed' : 'Send'}
             </button>
           </div>
         )}

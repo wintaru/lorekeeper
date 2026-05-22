@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import type { Character, FateEvent, FateEventType } from '@/types'
+import type { Character, FateEvent, FateEventType, Whisper } from '@/types'
 
 const XP_THRESHOLDS = [0,300,900,2700,6500,14000,23000,34000,48000,64000,85000,100000,120000,140000,165000,195000,225000,265000,305000,355000]
 function xpForNextLevel(level: number) { return level >= 20 ? null : XP_THRESHOLDS[level] }
@@ -49,10 +49,13 @@ export default function PlayerCampaignPage() {
   const [campaignId, setCampaignId] = useState<string | null>(null)
   const [character, setCharacter] = useState<Character | null>(null)
   const [fateLog, setFateLog] = useState<FateEvent[]>([])
+  const [whispers, setWhispers] = useState<Whisper[]>([])
   const [loading, setLoading] = useState(true)
   const [pushStatus, setPushStatus] = useState<'idle' | 'subscribed' | 'denied' | 'unsupported'>('idle')
   const [fateToast, setFateToast] = useState<FateEventType | null>(null)
+  const [whisperToast, setWhisperToast] = useState<string | null>(null)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const whisperToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [rollHistory, setRollHistory] = useState<RollEntry[]>([])
   const [rollExpr, setRollExpr] = useState('')
 
@@ -75,6 +78,12 @@ export default function PlayerCampaignPage() {
     if (isFateLogResponse(data)) setFateLog(data.events)
   }, [])
 
+  const loadWhispers = useCallback(async (characterId: string) => {
+    const res = await fetch(`/api/whispers?characterId=${characterId}`)
+    const data: unknown = await res.json()
+    if (isWhispersResponse(data)) setWhispers(data.whispers)
+  }, [])
+
   useEffect(() => {
     async function init() {
       const supabase = createClient()
@@ -88,13 +97,14 @@ export default function PlayerCampaignPage() {
     void init()
   }, [code, loadCharacter])
 
-  // Load fate log once character is known
+  // Load fate log and whispers once character is known
   useEffect(() => {
     if (!character || !campaignId) return
     void loadFateLog(campaignId, character.id)
-  }, [character?.id, campaignId, loadFateLog])
+    void loadWhispers(character.id)
+  }, [character?.id, campaignId, loadFateLog, loadWhispers])
 
-  // Realtime: HP updates, fate draws (toast), fate reveals (log refresh)
+  // Realtime: HP updates, fate draws (toast), fate reveals (log refresh), whispers (toast + log)
   useEffect(() => {
     if (!character || !campaignId) return
     const supabase = createClient()
@@ -114,26 +124,40 @@ export default function PlayerCampaignPage() {
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'fate_events', filter: `campaign_id=eq.${campaignId}` },
         () => { void loadFateLog(campaignId, character.id) })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'whispers', filter: `character_id=eq.${character.id}` },
+        payload => {
+          const row = payload.new as Record<string, unknown>
+          const whisper: Whisper = {
+            id: row.id as string,
+            characterId: row.character_id as string,
+            message: row.message as string,
+            createdAt: new Date(row.created_at as string),
+          }
+          setWhispers(prev => [whisper, ...prev])
+          if (whisperToastTimerRef.current) clearTimeout(whisperToastTimerRef.current)
+          setWhisperToast(whisper.message)
+          whisperToastTimerRef.current = setTimeout(() => setWhisperToast(null), 8000)
+        })
       .subscribe()
     return () => {
       void supabase.removeChannel(channel)
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+      if (whisperToastTimerRef.current) clearTimeout(whisperToastTimerRef.current)
     }
   }, [character?.id, campaignId, loadFateLog])
 
-  // Register service worker and subscribe to push
+  // Register service worker and subscribe to push.
+  // Always run on character load so this browser's subscription is synced to the DB —
+  // the player may have previously subscribed on a different device or cleared storage.
   useEffect(() => {
-    if (!character) return
+    if (!character?.id) return
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       setPushStatus('unsupported')
       return
     }
-    if (character.pushSubscription) {
-      setPushStatus('subscribed')
-      return
-    }
     void subscribeToPush(character.id, setPushStatus)
-  }, [character?.id, character?.pushSubscription])
+  }, [character?.id])
 
   if (loading) {
     return (
@@ -165,6 +189,13 @@ export default function PlayerCampaignPage() {
           <p className="text-lg font-bold leading-snug">{EVENT_TOAST[fateToast].message}</p>
           <p className="text-xs opacity-50 mt-2 uppercase tracking-widest">{EVENT_LABELS[fateToast]}</p>
           <button onClick={() => setFateToast(null)} className="absolute top-3 right-4 opacity-40 hover:opacity-80 text-sm transition-opacity">✕</button>
+        </div>
+      )}
+      {whisperToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-sm border-2 border-amber-700 bg-stone-950 rounded-2xl px-5 py-4 shadow-2xl animate-in slide-in-from-top-4 fade-in duration-300">
+          <p className="text-xs uppercase tracking-[0.2em] text-amber-500 mb-1">DM Whisper</p>
+          <p className="text-base text-stone-100 leading-snug">{whisperToast}</p>
+          <button onClick={() => setWhisperToast(null)} className="absolute top-3 right-4 text-stone-600 hover:text-stone-400 text-sm transition-opacity">✕</button>
         </div>
       )}
       <div className="max-w-sm mx-auto space-y-6">
@@ -303,21 +334,44 @@ export default function PlayerCampaignPage() {
           </div>
         )}
 
-        {fateLog.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs text-stone-500 uppercase tracking-widest">Fate History</p>
-            {fateLog.map(e => (
-              <div key={e.id} className="bg-stone-900 border border-stone-800 rounded-lg px-3 py-2.5 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-amber-400 text-sm font-medium">{EVENT_LABELS[e.eventType]}</span>
+        {(whispers.length > 0 || fateLog.length > 0) && (() => {
+          type LogEntry =
+            | { kind: 'whisper'; id: string; message: string; createdAt: Date }
+            | { kind: 'fate'; id: string; eventType: FateEventType; createdAt: Date }
+
+          const entries: LogEntry[] = [
+            ...whispers.map(w => ({ kind: 'whisper' as const, id: w.id, message: w.message, createdAt: w.createdAt })),
+            ...fateLog.map(e => ({ kind: 'fate' as const, id: e.id, eventType: e.eventType, createdAt: e.createdAt })),
+          ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+
+          return (
+            <div className="space-y-2">
+              <p className="text-xs text-stone-500 uppercase tracking-widest">Event Log</p>
+              {entries.map(entry => (
+                <div key={entry.id} className={`border rounded-lg px-3 py-2.5 flex items-start justify-between gap-3 ${
+                  entry.kind === 'whisper'
+                    ? 'bg-stone-900 border-amber-900/40'
+                    : 'bg-stone-900 border-stone-800'
+                }`}>
+                  {entry.kind === 'whisper' ? (
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-amber-500 uppercase tracking-wider mb-0.5">DM Whisper</p>
+                      <p className="text-sm text-stone-200 break-words">{entry.message}</p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 flex-1">
+                      <span className="text-amber-400 text-sm font-medium">{EVENT_LABELS[entry.eventType]}</span>
+                      <span className="text-xs text-stone-500">fate event</span>
+                    </div>
+                  )}
+                  <span className="text-stone-600 text-xs shrink-0 mt-0.5">
+                    {entry.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 </div>
-                <span className="text-stone-600 text-xs">
-                  {new Date(e.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )
+        })()}
 
         {/* Dice roller */}
         <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-3">
@@ -420,11 +474,25 @@ async function subscribeToPush(
   setStatus: (s: 'idle' | 'subscribed' | 'denied' | 'unsupported') => void,
 ) {
   try {
-    const permission = await Notification.requestPermission()
-    if (permission !== 'granted') { setStatus('denied'); return }
-
     const reg = await navigator.serviceWorker.register('/sw.js')
     await navigator.serviceWorker.ready
+
+    // If this browser already has an active push subscription, sync it to the DB
+    // so whispers go to the right device (not a stale subscription from another browser).
+    const existing = await reg.pushManager.getSubscription()
+    if (existing) {
+      await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ characterId, subscription: existing.toJSON() }),
+      })
+      setStatus('subscribed')
+      return
+    }
+
+    // No existing subscription — request permission and create one.
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') { setStatus('denied'); return }
 
     const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!
     const subscription = await reg.pushManager.subscribe({
@@ -456,6 +524,10 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
 
 function isFateLogResponse(v: unknown): v is { events: FateEvent[] } {
   return typeof v === 'object' && v !== null && 'events' in v && Array.isArray((v as Record<string, unknown>).events)
+}
+
+function isWhispersResponse(v: unknown): v is { whispers: Whisper[] } {
+  return typeof v === 'object' && v !== null && 'whispers' in v && Array.isArray((v as Record<string, unknown>).whispers)
 }
 
 function rowToCharacter(row: Record<string, unknown>): Character {

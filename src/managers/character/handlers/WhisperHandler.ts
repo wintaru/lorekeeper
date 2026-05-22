@@ -5,7 +5,7 @@ import type { ICharacterAccessor } from '@/accessors/character/ICharacterAccesso
 import type { INotificationAccessor } from '@/accessors/notification/INotificationAccessor'
 import { LoadCharacterRequest } from '@/accessors/character/CharacterRequests'
 import { LoadCharacterResponse } from '@/accessors/character/CharacterResponses'
-import { SendPushRequest } from '@/accessors/notification/NotificationRequests'
+import { SendPushRequest, StoreWhisperRequest } from '@/accessors/notification/NotificationRequests'
 import { WhisperRequest } from '../CharacterRequests'
 import { WhisperResponse } from '../CharacterResponses'
 
@@ -26,21 +26,24 @@ export class WhisperHandler implements IHandler {
       return new WhisperResponse(req.correlationId, false, loadResult.errorMessage ?? 'Character not found')
     }
 
-    const character = loadResult.character
-
-    if (!character.pushSubscription) {
-      return new WhisperResponse(req.correlationId, false, 'Character has no push subscription')
-    }
-
-    const pushResult = await this.notificationAccessor.send(
-      new SendPushRequest(
-        character.pushSubscription,
-        'DM Message',
-        req.message,
-        {},
-      )
+    // Persist the whisper to the DB — this is the reliable delivery path.
+    // Supabase Realtime will push it to the player's page regardless of push notification status.
+    const storeResult = await this.notificationAccessor.store(
+      new StoreWhisperRequest(req.characterId, req.message)
     )
 
-    return new WhisperResponse(req.correlationId, pushResult.success, pushResult.success ? undefined : (pushResult.errorMessage ?? 'Push failed'))
+    if (!storeResult.success) {
+      return new WhisperResponse(req.correlationId, false, storeResult.errorMessage ?? 'Failed to store whisper')
+    }
+
+    // Best-effort push notification — failure is non-fatal since the DB record is the source of truth.
+    const character = loadResult.character
+    if (character.pushSubscription) {
+      await this.notificationAccessor.send(
+        new SendPushRequest(character.pushSubscription, 'DM Whisper', req.message, {})
+      )
+    }
+
+    return new WhisperResponse(req.correlationId, true)
   }
 }

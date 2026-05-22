@@ -50,7 +50,9 @@ import { StoreFateEventRequest, MarkFateRevealedRequest, LoadFateLogRequest, Loa
 import { NotificationAccessor } from '@/accessors/notification/NotificationAccessor'
 import { SendPushHandler } from '@/accessors/notification/handlers/SendPushHandler'
 import { StoreSubscriptionHandler } from '@/accessors/notification/handlers/StoreSubscriptionHandler'
-import { SendPushRequest, StoreSubscriptionRequest } from '@/accessors/notification/NotificationRequests'
+import { StoreWhisperHandler } from '@/accessors/notification/handlers/StoreWhisperHandler'
+import { LoadWhispersHandler } from '@/accessors/notification/handlers/LoadWhispersHandler'
+import { SendPushRequest, StoreSubscriptionRequest, StoreWhisperRequest, LoadWhispersRequest } from '@/accessors/notification/NotificationRequests'
 
 // Engines — Fate
 import { FateEngine } from '@/engines/fate/FateEngine'
@@ -259,6 +261,10 @@ export function createContainer(): Container {
       .build(),
     new HandlerResolverBuilder()
       .register(StoreSubscriptionRequest, new StoreSubscriptionHandler(db))
+      .register(StoreWhisperRequest, new StoreWhisperHandler(db))
+      .build(),
+    new HandlerResolverBuilder()
+      .register(LoadWhispersRequest, new LoadWhispersHandler(db))
       .build(),
   )
 

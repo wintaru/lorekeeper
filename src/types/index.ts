@@ -121,6 +121,13 @@ export interface Character {
   createdAt: Date
 }
 
+export interface Whisper {
+  id: string
+  characterId: string
+  message: string
+  createdAt: Date
+}
+
 export interface CustomTable {
   id: string
   campaignId: string

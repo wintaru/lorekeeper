@@ -7,6 +7,7 @@ export class NotificationAccessor implements INotificationAccessor {
   constructor(
     private readonly sendResolver: HandlerResolver,
     private readonly storeResolver: HandlerResolver,
+    private readonly loadResolver: HandlerResolver,
   ) {}
 
   async send(request: RequestBase): Promise<ResponseBase> {
@@ -15,5 +16,9 @@ export class NotificationAccessor implements INotificationAccessor {
 
   async store(request: RequestBase): Promise<ResponseBase> {
     return this.storeResolver.resolve(request)
+  }
+
+  async load(request: RequestBase): Promise<ResponseBase> {
+    return this.loadResolver.resolve(request)
   }
 }
