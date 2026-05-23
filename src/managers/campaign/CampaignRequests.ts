@@ -1,5 +1,5 @@
 import { RequestBase } from '@/common/RequestBase'
-import type { SpellSlot } from '@/types'
+import type { SpellSlot, CharacterDetails } from '@/types'
 
 export class CreateCampaignRequest extends RequestBase {
   constructor(public readonly dmPin: string) { super() }
@@ -15,6 +15,7 @@ export class JoinCampaignRequest extends RequestBase {
     public readonly maxHp: number,
     public readonly armorClass: number,
     public readonly spellSlots: SpellSlot[] = [],
+    public readonly details: CharacterDetails = {},
   ) { super() }
 }
 

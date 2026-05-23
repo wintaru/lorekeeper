@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createContainer } from '@/container/DependencyContainer'
 import { JoinCampaignRequest } from '@/managers/campaign/CampaignRequests'
 import type { JoinCampaignResponse } from '@/managers/campaign/CampaignResponses'
+import type { AbilityScores } from '@/types'
 
 export async function POST(request: Request) {
   const body: unknown = await request.json()
@@ -20,6 +21,18 @@ export async function POST(request: Request) {
       body.maxHp,
       body.armorClass,
       body.spellSlots ?? [],
+      {
+        race: body.race,
+        background: body.background,
+        abilityScores: body.abilityScores,
+        speed: body.speed,
+        passivePerception: body.passivePerception,
+        personalityTraits: body.personalityTraits,
+        ideals: body.ideals,
+        bonds: body.bonds,
+        flaws: body.flaws,
+        backstory: body.backstory,
+      },
     )
   )) as JoinCampaignResponse
 
@@ -39,6 +52,16 @@ function isJoinBody(value: unknown): value is {
   maxHp: number
   armorClass: number
   spellSlots?: []
+  race?: string
+  background?: string
+  abilityScores?: AbilityScores
+  speed?: number
+  passivePerception?: number
+  personalityTraits?: string
+  ideals?: string
+  bonds?: string
+  flaws?: string
+  backstory?: string
 } {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>

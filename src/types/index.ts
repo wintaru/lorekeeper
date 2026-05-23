@@ -124,6 +124,28 @@ export interface FatePoolEntry {
   weight: number
 }
 
+export interface AbilityScores {
+  str: number
+  dex: number
+  con: number
+  int: number
+  wis: number
+  cha: number
+}
+
+export interface CharacterDetails {
+  race?: string
+  background?: string
+  abilityScores?: AbilityScores
+  speed?: number
+  passivePerception?: number
+  personalityTraits?: string
+  ideals?: string
+  bonds?: string
+  flaws?: string
+  backstory?: string
+}
+
 export interface DeathSaves {
   successes: number
   failures: number
@@ -151,11 +173,21 @@ export interface Character {
   playerName: string
   characterName: string
   class: string
+  race: string | null
+  background: string | null
   level: number
   xp: number
   maxHp: number
   currentHp: number
   armorClass: number
+  speed: number | null
+  passivePerception: number | null
+  abilityScores: AbilityScores | null
+  personalityTraits: string | null
+  ideals: string | null
+  bonds: string | null
+  flaws: string | null
+  backstory: string | null
   deathSaves: DeathSaves
   spellSlots: SpellSlot[]
   conditions: Condition[]

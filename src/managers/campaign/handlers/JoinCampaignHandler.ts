@@ -51,6 +51,7 @@ export class JoinCampaignHandler implements IHandler {
         req.maxHp,
         req.armorClass,
         req.spellSlots,
+        req.details,
       )
     )) as StoreCharacterResponse
 

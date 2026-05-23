@@ -725,6 +725,35 @@ export default function PlayerCampaignPage() {
               </button>
             ))}
           </div>
+
+          {character.abilityScores && (
+            <div>
+              <p className="text-xs text-stone-600 mb-1.5">Ability checks (d20 + mod)</p>
+              <div className="grid grid-cols-6 gap-1.5">
+                {(['str','dex','con','int','wis','cha'] as const).map(key => {
+                  const score = character.abilityScores?.[key]
+                  if (score == null) return null
+                  const mod = Math.floor((score - 10) / 2)
+                  const modStr = mod >= 0 ? `+${mod}` : `${mod}`
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        const roll = Math.floor(Math.random() * 20) + 1
+                        const total = roll + mod
+                        const label = `${key.toUpperCase()} (${modStr})`
+                        setRollHistory(h => [{ label, result: total, timestamp: new Date() }, ...h].slice(0, 20))
+                      }}
+                      className="flex flex-col items-center py-1.5 bg-stone-800 hover:bg-stone-700 border border-stone-700 rounded-lg transition-colors"
+                    >
+                      <span className="text-xs text-stone-400 uppercase">{key}</span>
+                      <span className="text-sm font-bold font-mono">{modStr}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           <div className="flex gap-2">
             <input
               value={rollExpr}
@@ -1263,11 +1292,21 @@ function rowToCharacter(row: Record<string, unknown>): Character {
     playerName: row.player_name as string,
     characterName: row.character_name as string,
     class: row.class as string,
+    race: (row.race as string) ?? null,
+    background: (row.background as string) ?? null,
     level: row.level as number,
     xp: (row.xp as number) ?? 0,
     maxHp: row.max_hp as number,
     currentHp: row.current_hp as number,
     armorClass: row.armor_class as number,
+    speed: (row.speed as number) ?? null,
+    passivePerception: (row.passive_perception as number) ?? null,
+    abilityScores: (row.ability_scores as Character['abilityScores']) ?? null,
+    personalityTraits: (row.personality_traits as string) ?? null,
+    ideals: (row.ideals as string) ?? null,
+    bonds: (row.bonds as string) ?? null,
+    flaws: (row.flaws as string) ?? null,
+    backstory: (row.backstory as string) ?? null,
     deathSaves: (row.death_saves as Character['deathSaves']) ?? { successes: 0, failures: 0 },
     spellSlots: (row.spell_slots as Character['spellSlots']) ?? [],
     conditions: (row.conditions as Character['conditions']) ?? [],

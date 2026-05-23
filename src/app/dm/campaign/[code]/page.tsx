@@ -72,6 +72,7 @@ export default function DmControlPanel() {
   const [rollHistory, setRollHistory] = useState<RollEntry[]>([])
   const [monsterGroups, setMonsterGroups] = useState<MonsterGroup[]>([])
   const [encounterDifficulty, setEncounterDifficulty] = useState<EncounterDifficulty | null>(null)
+  const [showShortcuts, setShowShortcuts] = useState(false)
 
   const fetchRoster = useCallback(async (cid: string) => {
     const res = await fetch(`/api/campaigns/roster?campaignId=${cid}`)
@@ -131,6 +132,25 @@ export default function DmControlPanel() {
     return () => { void supabase.removeChannel(channel) }
   }, [campaignId, fetchRoster, fetchCombatSession, fetchInitiativeRequest])
 
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const tabs: Tab[] = ['roster', 'combat', 'fate', 'world', 'encounter', 'maps', 'spells', 'rulebook']
+      if (e.key >= '1' && e.key <= '8') {
+        setTab(tabs[parseInt(e.key, 10) - 1])
+      } else if (e.key === 'd' || e.key === 'D') {
+        setShowDice(v => !v)
+      } else if (e.key === '?') {
+        setShowShortcuts(v => !v)
+      } else if (e.key === 'Escape') {
+        setShowShortcuts(false)
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [])
+
   if (loading) {
     return (
       <main className="min-h-screen bg-stone-950 text-stone-100 flex items-center justify-center">
@@ -157,6 +177,10 @@ export default function DmControlPanel() {
           <button onClick={() => setShowDice(v => !v)}
             className={`text-lg px-2 py-1 rounded transition-colors ${showDice ? 'text-amber-400 bg-amber-950/40' : 'text-stone-500 hover:text-stone-300'}`}
             title="Dice roller">🎲</button>
+          <button
+            onClick={() => setShowShortcuts(v => !v)}
+            className={`text-sm font-bold w-7 h-7 flex items-center justify-center rounded border transition-colors ${showShortcuts ? 'text-amber-400 bg-amber-950/40 border-amber-700/50' : 'text-stone-500 hover:text-stone-300 border-stone-700'}`}
+            title="Keyboard shortcuts (?)">?</button>
           <span className="text-xs text-stone-500 bg-stone-900 px-2 py-1 rounded">
             {characters.length} player{characters.length !== 1 ? 's' : ''}
           </span>
@@ -219,6 +243,39 @@ export default function DmControlPanel() {
         {tab === 'spells' && <SpellsTab />}
         {tab === 'rulebook' && <RulebookTab />}
       </div>
+
+      {showShortcuts && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowShortcuts(false)}>
+          <div className="bg-stone-900 border border-stone-700 rounded-2xl p-6 max-w-xs w-full" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-semibold text-stone-100">Keyboard Shortcuts</h2>
+              <button onClick={() => setShowShortcuts(false)} className="text-stone-500 hover:text-stone-300 text-lg leading-none">✕</button>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-stone-500 uppercase tracking-wider mb-2">Tabs</p>
+              {(['roster', 'combat', 'fate', 'world', 'encounter', 'maps', 'spells', 'rulebook'] as Tab[]).map((t, i) => (
+                <div key={t} className="flex items-center text-sm">
+                  <kbd className="bg-stone-800 border border-stone-700 text-stone-300 px-2 py-0.5 rounded text-xs font-mono w-6 text-center shrink-0">{i + 1}</kbd>
+                  <span className="text-stone-400 ml-3">{TAB_LABELS[t]}</span>
+                </div>
+              ))}
+              <div className="border-t border-stone-800 my-3" />
+              <p className="text-xs text-stone-500 uppercase tracking-wider mb-2">Actions</p>
+              {([
+                { key: 'D', desc: 'Toggle dice roller' },
+                { key: 'N', desc: 'Next turn (combat)' },
+                { key: '?', desc: 'Toggle this panel' },
+                { key: 'Esc', desc: 'Close panels' },
+              ] as { key: string; desc: string }[]).map(({ key, desc }) => (
+                <div key={key} className="flex items-center text-sm">
+                  <kbd className="bg-stone-800 border border-stone-700 text-stone-300 px-2 py-0.5 rounded text-xs font-mono min-w-[1.5rem] text-center shrink-0">{key}</kbd>
+                  <span className="text-stone-400 ml-3">{desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
@@ -255,6 +312,7 @@ function CharacterCard({ character: c, onRefresh }: { character: Character; onRe
   const [confirmKick, setConfirmKick] = useState(false)
   const [showStatEdit, setShowStatEdit] = useState(false)
   const [showConditions, setShowConditions] = useState(false)
+  const [showFightingStyle, setShowFightingStyle] = useState(false)
   const [maxHpInput, setMaxHpInput] = useState(String(c.maxHp))
   const [currentHpInput, setCurrentHpInput] = useState(String(c.currentHp))
   const [acInput, setAcInput] = useState(String(c.armorClass))
@@ -501,8 +559,108 @@ function CharacterCard({ character: c, onRefresh }: { character: Character; onRe
           </div>
         )}
       </div>
+
+      {/* Fighting style analysis */}
+      <div className="border-t border-stone-800/50 pt-3">
+        <button
+          onClick={() => setShowFightingStyle(v => !v)}
+          className="text-xs text-stone-600 hover:text-stone-400 transition-colors"
+        >
+          {showFightingStyle ? 'Hide fighting style' : 'Fighting style'}
+        </button>
+        {showFightingStyle && (
+          <p className="text-sm text-stone-300 mt-2 leading-relaxed italic">
+            {describeFightingStyle(c)}
+          </p>
+        )}
+      </div>
     </div>
   )
+}
+
+// ── Fighting style analysis ───────────────────────────────────────────────────
+
+function describeFightingStyle(c: Character): string {
+  const scores = c.abilityScores
+  const cls = c.class.toLowerCase()
+  const hasSpells = c.spellSlots.length > 0
+  const maxSlotLevel = hasSpells ? Math.max(...c.spellSlots.map(s => s.level)) : 0
+  const isFullCaster = hasSpells && maxSlotLevel >= 5
+  const isHighAC = c.armorClass >= 17
+  const isLowAC  = c.armorClass <= 12
+  const isHighHP = c.maxHp >= c.level * 10
+  const isLowHP  = c.maxHp <= c.level * 5
+
+  // Sort ability scores highest → lowest
+  const sorted = scores
+    ? (Object.entries(scores) as [keyof typeof scores, number][]).sort((a, b) => b[1] - a[1])
+    : []
+  const top1   = sorted[0]?.[0] ?? null
+  const bottom  = sorted[sorted.length - 1]?.[0] ?? null
+  const botVal  = sorted[sorted.length - 1]?.[1] ?? 10
+
+  // ── Role sentence (class-based) ──────────────────────────────────────────
+  const roleMap: Record<string, string> = {
+    barbarian:     `${c.characterName} is a raging frontliner who charges headfirst into the thick of combat.`,
+    fighter:       `${c.characterName} is a disciplined combatant with a broad martial toolkit.`,
+    paladin:       `${c.characterName} is a holy warrior who anchors the frontline while backing allies with divine power.`,
+    ranger:        `${c.characterName} is a hunter who excels at controlling the battlefield from range.`,
+    rogue:         `${c.characterName} is a surgical striker who waits for the perfect moment to deal decisive blows.`,
+    monk:          `${c.characterName} is a mobile skirmisher who darts in and out of reach.`,
+    cleric:        `${c.characterName} is a divine agent who swings between frontline presence and crucial support.`,
+    druid:         `${c.characterName} is a shapeshifter and nature-caller who adapts their role to the encounter.`,
+    wizard:        `${c.characterName} is an arcane artillery piece who can reshape encounters with the right spell.`,
+    sorcerer:      `${c.characterName} is a raw magical powerhouse who blasts enemies with innate arcane force.`,
+    warlock:       `${c.characterName} is a pact-bound striker who leans on eldritch power and recovers between short rests.`,
+    bard:          `${c.characterName} is a versatile wildcard who inspires allies while keeping enemies off-balance.`,
+    artificer:     `${c.characterName} is a gadget-wielding tactician who supports the party with tools and spells.`,
+    'blood hunter':`${c.characterName} is a hunter of dark things who brands enemies and bleeds for power.`,
+  }
+  const role = roleMap[cls] ?? `${c.characterName} is a capable combatant whose fighting style blends multiple disciplines.`
+
+  // ── Approach sentence (dominant stat + AC) ───────────────────────────────
+  let approach = ''
+  if (top1 === 'str' && isHighAC) {
+    approach = `With high Strength and solid armor, they punch through defenses and absorb punishment in equal measure.`
+  } else if (top1 === 'str') {
+    approach = `Their raw Strength makes them hit hard, though they're more of an aggressive attacker than a defensive anchor.`
+  } else if (top1 === 'dex' && isLowAC) {
+    approach = `They rely on mobility and precision rather than heavy armor — they're dangerous when allowed to move freely.`
+  } else if (top1 === 'dex') {
+    approach = `Their agility keeps them light on their feet, favoring finesse and positioning over brute force.`
+  } else if (top1 === 'int' && isFullCaster) {
+    approach = `Their commanding Intelligence lets them pick spells that exploit exactly where enemies are weakest.`
+  } else if (top1 === 'wis' && isFullCaster) {
+    approach = `Their Wisdom guides both their divine magic and their reading of the battlefield.`
+  } else if (top1 === 'cha' && isFullCaster) {
+    approach = `Their Charisma fuels their magic and makes them a commanding presence even outside of combat.`
+  } else if (top1 === 'con') {
+    approach = `Their exceptional Constitution makes them an endurance fighter — they outlast what they can't outfight.`
+  } else {
+    approach = `Their stat spread suggests a balanced approach, adapting to whatever the encounter demands.`
+  }
+
+  // ── Vulnerability / key note ─────────────────────────────────────────────
+  let note = ''
+  if (isLowHP && isLowAC) {
+    note = `Keep them off the front line — they'll fold quickly if enemies close the gap.`
+  } else if (isHighHP && isHighAC) {
+    note = `They can afford to be aggressive; they're one of the most durable targets on the field.`
+  } else if (isFullCaster && (isLowHP || isLowAC)) {
+    note = `Their power is in their spells — protect them or expect them to burn slots on self-preservation.`
+  } else if (bottom === 'wis' && botVal <= 8) {
+    note = `Their low Wisdom makes them vulnerable to charm and fear effects — mind-affecting magic will hit them harder than most.`
+  } else if (bottom === 'con' && botVal <= 8) {
+    note = `Their weak Constitution means concentration checks are a liability whenever they take damage.`
+  } else if (isHighAC && !isHighHP) {
+    note = `Hard to hit but not inexhaustible — they'll hold the line but need healing to sustain it.`
+  } else if (!scores) {
+    note = `No ability scores on file — this read is based on class alone.`
+  } else {
+    note = `A well-rounded combatant without glaring blind spots — use varied encounter types to keep them challenged.`
+  }
+
+  return `${role} ${approach} ${note}`
 }
 
 // ── Combat Tab ────────────────────────────────────────────────────────────────
@@ -599,7 +757,7 @@ function CombatTab({ campaignId, characters, session, onSessionChange, onRosterR
     }
   }
 
-  async function handleNextTurn() {
+  const handleNextTurn = useCallback(async () => {
     if (!session) return
     setLoading(true)
     try {
@@ -618,7 +776,18 @@ function CombatTab({ campaignId, characters, session, onSessionChange, onRosterR
     } finally {
       setLoading(false)
     }
-  }
+  }, [session, onSessionChange])
+
+  useEffect(() => {
+    if (!session) return
+    function handleKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === 'n' || e.key === 'N') void handleNextTurn()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [session, handleNextTurn])
 
   async function handleHpChange(characterId: string, delta: number, currentHp: number, maxHp: number) {
     const newHp = Math.max(0, Math.min(maxHp, currentHp + delta))
