@@ -2120,7 +2120,7 @@ function QuestGenerator({ campaignId, onQuestSaved }: { campaignId: string; onQu
     const q = quests[idx]
     const title = q.title.trim() || `${q.type}: ${q.target}`
     updateField(idx, 'saving', true)
-    await fetch('/api/world/quests', {
+    const res = await fetch('/api/world/quests', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2137,8 +2137,10 @@ function QuestGenerator({ campaignId, onQuestSaved }: { campaignId: string; onQu
       }),
     })
     updateField(idx, 'saving', false)
-    updateField(idx, 'saved', true)
-    onQuestSaved?.()
+    if (res.ok) {
+      updateField(idx, 'saved', true)
+      onQuestSaved?.()
+    }
   }
 
   async function saveAll() {
@@ -2296,12 +2298,12 @@ function QuestsSection({ campaignId, quests, onRefresh }: { campaignId: string; 
 
   async function handleAdd() {
     if (!form.title.trim()) return
-    await fetch('/api/world/quests', {
+    const res = await fetch('/api/world/quests', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ campaignId, ...form, title: form.title.trim() }),
     })
-    setForm(emptyForm); setShowForm(false); onRefresh()
+    if (res.ok) { setForm(emptyForm); setShowForm(false); onRefresh() }
   }
 
   async function handleEdit(q: Quest) {
