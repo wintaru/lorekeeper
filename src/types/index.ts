@@ -34,6 +34,11 @@ export interface Location {
   createdAt: Date
 }
 
+export interface CustomCurrencyEntry {
+  name: string
+  amount: number
+}
+
 export interface InventoryItem {
   name: string
   quantity: number
@@ -57,10 +62,49 @@ export interface Campaign {
   id: string
   code: string
   gold: number
+  silver: number
+  copper: number
+  customCurrency: CustomCurrencyEntry[]
   sharedItems: InventoryItem[]
+  mapAccessGranted: boolean
+  sharedMapIds: string[]
+  mapViewport: MapViewport | null
   createdAt: Date
   lastActiveAt: Date
   expiresAt: Date
+}
+
+export type MapType = 'town' | 'city' | 'world' | 'dungeon'
+
+export interface CampaignMap {
+  id: string
+  campaignId: string
+  name: string
+  type: MapType
+  storagePath: string
+  imageUrl: string
+  createdAt: Date
+}
+
+export interface MapViewportPoint {
+  x: number
+  y: number
+}
+
+export interface MapViewport {
+  mapId: string
+  shape: 'rect' | 'circle' | 'polygon'
+  // rect: top-left corner + size (all 0–1 normalized)
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  // circle: center + radius (0–1 normalized)
+  cx?: number
+  cy?: number
+  r?: number
+  // polygon: ordered point list (0–1 normalized)
+  points?: MapViewportPoint[]
 }
 
 export type FateEventType = 'attack' | 'curse' | 'windfall' | 'betrayal' | 'mystery'
@@ -116,6 +160,10 @@ export interface Character {
   spellSlots: SpellSlot[]
   conditions: Condition[]
   loot: LootItem[]
+  gold: number
+  silver: number
+  copper: number
+  customCurrency: CustomCurrencyEntry[]
   pushSubscription: PushSubscriptionJSON | null
   isActive: boolean
   createdAt: Date
@@ -128,10 +176,77 @@ export interface Whisper {
   createdAt: Date
 }
 
+export interface InitiativeRequest {
+  id: string
+  campaignId: string
+  status: 'pending' | 'resolved'
+  rolls: Record<string, number>
+  createdAt: Date
+}
+
 export interface CustomTable {
   id: string
   campaignId: string
   name: string
   entries: string[]
   createdAt: Date
+}
+
+export type DamageType =
+  | 'acid' | 'bludgeoning' | 'cold' | 'fire' | 'force'
+  | 'lightning' | 'necrotic' | 'piercing' | 'poison'
+  | 'psychic' | 'radiant' | 'slashing' | 'thunder'
+
+export type ConditionImmunityType =
+  | 'blinded' | 'charmed' | 'deafened' | 'exhaustion'
+  | 'frightened' | 'grappled' | 'incapacitated' | 'invisible'
+  | 'paralyzed' | 'petrified' | 'poisoned' | 'prone'
+  | 'restrained' | 'stunned' | 'unconscious'
+
+export interface MonsterAbilityScores {
+  str: number
+  dex: number
+  con: number
+  int: number
+  wis: number
+  cha: number
+}
+
+export interface Monster {
+  name: string
+  cr: string
+  hp: number
+  ac: number
+  speed: string
+  abilityScores: MonsterAbilityScores
+  skills: string
+  damageImmunities: DamageType[]
+  conditionImmunities: ConditionImmunityType[]
+  senses: string
+  legendaryActions: boolean
+  lairActions: boolean
+  legendaryResistance: boolean
+}
+
+export interface MonsterGroup {
+  id: string
+  monster: Monster
+  count: number
+}
+
+export interface EncounterBreakdown {
+  xpScore: number
+  acPenalty: number
+  immunityBonus: number
+  hpPenalty: number
+  specialBonus: number
+  adjustedXP: number
+  partyDeadlyThreshold: number
+}
+
+export interface EncounterDifficulty {
+  score: number
+  label: string
+  colorClass: string
+  breakdown: EncounterBreakdown
 }

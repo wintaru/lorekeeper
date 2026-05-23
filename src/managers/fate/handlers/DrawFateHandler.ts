@@ -50,7 +50,7 @@ export class DrawFateHandler implements IHandler {
       .map(c => ({
         characterId: c.id,
         weight: req.dangerWeighted
-          ? Math.max(0.1, 1 - (c.currentHp / c.maxHp))  // lower HP = higher weight
+          ? Math.max(0.05, Math.pow(Math.max(0, 1 - c.currentHp / c.maxHp), 2))
           : 1,
       }))
 

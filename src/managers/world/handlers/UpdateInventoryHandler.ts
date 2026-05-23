@@ -13,7 +13,7 @@ export class UpdateInventoryHandler implements IHandler {
   async handle(request: RequestBase): Promise<ResponseBase> {
     const req = request as UpdateInventoryRequest
     const result = (await this.worldAccessor.store(
-      new UpdateCampaignInventoryRequest(req.campaignId, req.gold, req.sharedItems)
+      new UpdateCampaignInventoryRequest(req.campaignId, req.gold, req.silver, req.copper, req.customCurrency, req.sharedItems)
     )) as UpdateCampaignInventoryResponse
 
     if (!result.success) {

@@ -24,3 +24,23 @@ export class NextTurnRequest extends RequestBase {
 export class GetCombatSessionRequest extends RequestBase {
   constructor(public readonly campaignId: string) { super() }
 }
+
+export class RequestInitiativeRequest extends RequestBase {
+  constructor(public readonly campaignId: string) { super() }
+}
+
+export class GetInitiativeRequestRequest extends RequestBase {
+  constructor(public readonly campaignId: string) { super() }
+}
+
+export class SubmitInitiativeRollRequest extends RequestBase {
+  constructor(
+    public readonly campaignId: string,
+    public readonly characterId: string,
+    public readonly roll: number,
+  ) { super() }
+}
+
+export class ResolveInitiativeRequest extends RequestBase {
+  constructor(public readonly campaignId: string) { super() }
+}

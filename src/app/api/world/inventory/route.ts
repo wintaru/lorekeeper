@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createContainer } from '@/container/DependencyContainer'
 import { GetInventoryRequest, UpdateInventoryRequest } from '@/managers/world/WorldRequests'
 import type { GetInventoryResponse, DeleteResponse } from '@/managers/world/WorldResponses'
-import type { InventoryItem } from '@/types'
+import type { InventoryItem, CustomCurrencyEntry } from '@/types'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -12,7 +12,13 @@ export async function GET(request: Request) {
   const { worldManager } = createContainer()
   const result = (await worldManager.query(new GetInventoryRequest(campaignId))) as GetInventoryResponse
 
-  return NextResponse.json({ gold: result.gold, sharedItems: result.sharedItems })
+  return NextResponse.json({
+    gold: result.gold,
+    silver: result.silver,
+    copper: result.copper,
+    customCurrency: result.customCurrency,
+    sharedItems: result.sharedItems,
+  })
 }
 
 export async function PUT(request: Request) {
@@ -23,7 +29,14 @@ export async function PUT(request: Request) {
 
   const { worldManager } = createContainer()
   const result = (await worldManager.execute(
-    new UpdateInventoryRequest(body.campaignId, body.gold, body.sharedItems)
+    new UpdateInventoryRequest(
+      body.campaignId,
+      body.gold,
+      body.silver ?? 0,
+      body.copper ?? 0,
+      body.customCurrency ?? [],
+      body.sharedItems,
+    )
   )) as DeleteResponse
 
   if (!result.success) {
@@ -36,6 +49,9 @@ export async function PUT(request: Request) {
 function isUpdateInventoryBody(value: unknown): value is {
   campaignId: string
   gold: number
+  silver?: number
+  copper?: number
+  customCurrency?: CustomCurrencyEntry[]
   sharedItems: InventoryItem[]
 } {
   if (typeof value !== 'object' || value === null) return false

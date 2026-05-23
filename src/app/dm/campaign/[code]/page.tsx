@@ -3,9 +3,16 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import type { Character, FateEvent, FateEventType, CombatSession, Condition, DeathSaves, Npc, Location, SessionNote, InventoryItem, LootItem, NpcRelationship, CustomTable } from '@/types'
+import type { Character, FateEvent, FateEventType, CombatSession, Condition, DeathSaves, Npc, Location, SessionNote, InventoryItem, LootItem, NpcRelationship, CustomTable, CustomCurrencyEntry, MonsterGroup, Monster, DamageType, ConditionImmunityType, EncounterDifficulty, CampaignMap, MapViewport, MapType, InitiativeRequest } from '@/types'
+import { EncounterEngine } from '@/engines/encounter/EncounterEngine'
+import { EvaluateEncounterRequest } from '@/engines/encounter/EncounterEngineRequests'
+import { EvaluateEncounterResponse } from '@/engines/encounter/EncounterEngineResponses'
+import { HandlerResolverBuilder } from '@/common/resolver/HandlerResolverBuilder'
+import { EvaluateEncounterHandler } from '@/engines/encounter/handlers/EvaluateEncounterHandler'
+import { SpellsTab } from '@/components/SpellsTab'
+import { RulebookTab } from '@/components/RulebookTab'
 
-type Tab = 'roster' | 'combat' | 'fate' | 'world'
+type Tab = 'roster' | 'combat' | 'fate' | 'world' | 'encounter' | 'maps' | 'spells' | 'rulebook'
 type WorldTab = 'npcs' | 'locations' | 'inventory' | 'log' | 'tables'
 
 // D&D 5e XP thresholds — index = level - 1
@@ -30,15 +37,41 @@ const EVENT_TYPES: { value: FateEventType; label: string; description: string }[
   { value: 'mystery',  label: 'Mystery',  description: 'The fates remain cryptic' },
 ]
 
+const encounterEngine = new EncounterEngine(
+  new HandlerResolverBuilder().register(EvaluateEncounterRequest, new EvaluateEncounterHandler()).build()
+)
+
+const CONDITION_ICONS: Record<string, string> = {
+  blinded:       '👁️',
+  charmed:       '💗',
+  deafened:      '🔇',
+  exhaustion:    '💤',
+  frightened:    '😨',
+  grappled:      '🤼',
+  incapacitated: '😵',
+  invisible:     '👻',
+  paralyzed:     '⚡',
+  petrified:     '🪨',
+  poisoned:      '🤢',
+  prone:         '↙️',
+  restrained:    '⛓️',
+  stunned:       '💫',
+  unconscious:   '😴',
+}
+const STANDARD_CONDITIONS = Object.keys(CONDITION_ICONS)
+
 export default function DmControlPanel() {
   const { code } = useParams<{ code: string }>()
   const [tab, setTab] = useState<Tab>('roster')
   const [campaignId, setCampaignId] = useState<string | null>(null)
   const [characters, setCharacters] = useState<Character[]>([])
   const [combatSession, setCombatSession] = useState<CombatSession | null>(null)
+  const [initiativeRequest, setInitiativeRequest] = useState<InitiativeRequest | null>(null)
   const [loading, setLoading] = useState(true)
   const [showDice, setShowDice] = useState(false)
   const [rollHistory, setRollHistory] = useState<RollEntry[]>([])
+  const [monsterGroups, setMonsterGroups] = useState<MonsterGroup[]>([])
+  const [encounterDifficulty, setEncounterDifficulty] = useState<EncounterDifficulty | null>(null)
 
   const fetchRoster = useCallback(async (cid: string) => {
     const res = await fetch(`/api/campaigns/roster?campaignId=${cid}`)
@@ -52,6 +85,12 @@ export default function DmControlPanel() {
     if (isCombatSessionResponse(data)) setCombatSession(data.session)
   }, [])
 
+  const fetchInitiativeRequest = useCallback(async (cid: string) => {
+    const res = await fetch(`/api/initiative/request?campaignId=${cid}`)
+    const data: unknown = await res.json()
+    if (isInitiativeRequestResponse(data)) setInitiativeRequest(data.request)
+  }, [])
+
   useEffect(() => {
     async function init() {
       const supabase = createClient()
@@ -59,11 +98,19 @@ export default function DmControlPanel() {
       if (!data) { setLoading(false); return }
       const cid = data.id as string
       setCampaignId(cid)
-      await Promise.all([fetchRoster(cid), fetchCombatSession(cid)])
+      await Promise.all([fetchRoster(cid), fetchCombatSession(cid), fetchInitiativeRequest(cid)])
       setLoading(false)
     }
     void init()
-  }, [code, fetchRoster, fetchCombatSession])
+  }, [code, fetchRoster, fetchCombatSession, fetchInitiativeRequest])
+
+  useEffect(() => {
+    if (monsterGroups.length === 0 || characters.length === 0) { setEncounterDifficulty(null); return }
+    void encounterEngine.evaluate(new EvaluateEncounterRequest(monsterGroups, characters)).then(res => {
+      const r = res as EvaluateEncounterResponse
+      if (r.success && r.difficulty) setEncounterDifficulty(r.difficulty)
+    })
+  }, [monsterGroups, characters])
 
   useEffect(() => {
     if (!campaignId) return
@@ -76,9 +123,13 @@ export default function DmControlPanel() {
         () => { void fetchCombatSession(campaignId) })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'combat_sessions', filter: `campaign_id=eq.${campaignId}` },
         () => { void fetchCombatSession(campaignId) })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'initiative_requests', filter: `campaign_id=eq.${campaignId}` },
+        () => { void fetchInitiativeRequest(campaignId) })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'initiative_requests', filter: `campaign_id=eq.${campaignId}` },
+        () => { void fetchInitiativeRequest(campaignId) })
       .subscribe()
     return () => { void supabase.removeChannel(channel) }
-  }, [campaignId, fetchRoster, fetchCombatSession])
+  }, [campaignId, fetchRoster, fetchCombatSession, fetchInitiativeRequest])
 
   if (loading) {
     return (
@@ -88,7 +139,7 @@ export default function DmControlPanel() {
     )
   }
 
-  const TAB_LABELS: Record<Tab, string> = { roster: 'Roster', combat: 'Combat', fate: 'Fate Engine', world: 'World' }
+  const TAB_LABELS: Record<Tab, string> = { roster: 'Roster', combat: 'Combat', fate: 'Fate Engine', world: 'World', encounter: 'Encounter', maps: 'Maps', spells: 'Spells', rulebook: 'Rulebook' }
 
   return (
     <main className="min-h-screen bg-stone-950 text-stone-100">
@@ -113,7 +164,7 @@ export default function DmControlPanel() {
       </div>
 
       <div className="border-b border-stone-800 flex overflow-x-auto">
-        {(['roster', 'combat', 'fate', 'world'] as Tab[]).map(t => (
+        {(['roster', 'combat', 'fate', 'world', 'encounter', 'maps', 'spells', 'rulebook'] as Tab[]).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -144,6 +195,8 @@ export default function DmControlPanel() {
             session={combatSession}
             onSessionChange={setCombatSession}
             onRosterRefresh={() => void fetchRoster(campaignId)}
+            initiativeRequest={initiativeRequest}
+            onInitiativeRequestChange={setInitiativeRequest}
           />
         )}
         {tab === 'fate' && campaignId && (
@@ -152,6 +205,19 @@ export default function DmControlPanel() {
         {tab === 'world' && campaignId && (
           <WorldTab campaignId={campaignId} characters={characters} />
         )}
+        {tab === 'encounter' && (
+          <EncounterTab
+            characters={characters}
+            monsterGroups={monsterGroups}
+            difficulty={encounterDifficulty}
+            onGroupsChange={setMonsterGroups}
+          />
+        )}
+        {tab === 'maps' && campaignId && (
+          <MapsTab campaignId={campaignId} />
+        )}
+        {tab === 'spells' && <SpellsTab />}
+        {tab === 'rulebook' && <RulebookTab />}
       </div>
     </main>
   )
@@ -186,6 +252,35 @@ function CharacterCard({ character: c, onRefresh }: { character: Character; onRe
   const [showWhisper, setShowWhisper] = useState(false)
   const [whisperSent, setWhisperSent] = useState(false)
   const [whisperError, setWhisperError] = useState(false)
+  const [confirmKick, setConfirmKick] = useState(false)
+  const [showStatEdit, setShowStatEdit] = useState(false)
+  const [showConditions, setShowConditions] = useState(false)
+  const [maxHpInput, setMaxHpInput] = useState(String(c.maxHp))
+  const [currentHpInput, setCurrentHpInput] = useState(String(c.currentHp))
+  const [acInput, setAcInput] = useState(String(c.armorClass))
+
+  async function handleSaveStats() {
+    const maxHp = parseInt(maxHpInput, 10)
+    const currentHp = Math.min(parseInt(currentHpInput, 10), maxHp)
+    const armorClass = parseInt(acInput, 10)
+    if (isNaN(maxHp) || isNaN(currentHp) || isNaN(armorClass)) return
+    await fetch('/api/characters/stats', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId: c.id, maxHp, currentHp, armorClass }),
+    })
+    setShowStatEdit(false)
+    onRefresh()
+  }
+
+  async function handleKick() {
+    await fetch('/api/characters/kick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId: c.id }),
+    })
+    onRefresh()
+  }
 
   async function handleAwardXp() {
     const amount = parseInt(xpInput, 10)
@@ -214,6 +309,19 @@ function CharacterCard({ character: c, onRefresh }: { character: Character; onRe
     }
   }
 
+  async function handleToggleCondition(name: string) {
+    const isActive = c.conditions.some(cond => cond.name.toLowerCase() === name)
+    const newConditions = isActive
+      ? c.conditions.filter(cond => cond.name.toLowerCase() !== name)
+      : [...c.conditions, { name: name.charAt(0).toUpperCase() + name.slice(1), roundsRemaining: null }]
+    await fetch('/api/characters/conditions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId: c.id, conditions: newConditions }),
+    })
+    onRefresh()
+  }
+
   return (
     <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-3">
       <div className="flex items-start justify-between">
@@ -221,9 +329,29 @@ function CharacterCard({ character: c, onRefresh }: { character: Character; onRe
           <p className="font-semibold">{c.characterName}</p>
           <p className="text-stone-400 text-sm">{c.playerName} · {c.class} {c.level}</p>
         </div>
-        <div className="text-right">
-          <span className="text-lg font-bold">{c.currentHp}</span>
-          <span className="text-stone-500 text-sm"> / {c.maxHp} HP</span>
+        <div className="flex items-start gap-3">
+          <div className="text-right">
+            <span className="text-lg font-bold">{c.currentHp}</span>
+            <span className="text-stone-500 text-sm"> / {c.maxHp} HP</span>
+          </div>
+          {confirmKick ? (
+            <div className="flex gap-1">
+              <button onClick={() => void handleKick()}
+                className="text-xs bg-red-800 hover:bg-red-700 text-red-200 px-2 py-1 rounded transition-colors">
+                Kick
+              </button>
+              <button onClick={() => setConfirmKick(false)}
+                className="text-xs text-stone-500 hover:text-stone-300 px-2 py-1 transition-colors">
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmKick(true)}
+              className="text-stone-700 hover:text-red-500 text-xs transition-colors mt-1"
+              title="Kick player">
+              ✕
+            </button>
+          )}
         </div>
       </div>
       <div className="h-1.5 bg-stone-800 rounded-full overflow-hidden">
@@ -231,12 +359,20 @@ function CharacterCard({ character: c, onRefresh }: { character: Character; onRe
       </div>
       <div className="flex items-center gap-3 text-sm text-stone-400 flex-wrap">
         <span>AC {c.armorClass}</span>
-        {c.conditions.length > 0 && (
-          <span className="text-amber-400">{c.conditions.map(cn => cn.name).join(', ')}</span>
-        )}
-        {c.currentHp === 0 && (
-          <span className="text-red-400 text-xs">💀 {c.deathSaves.successes}S / {c.deathSaves.failures}F</span>
-        )}
+        {c.currentHp === 0 && c.deathSaves.failures >= 3
+          ? <span title="Dead" className="text-base leading-none">💀</span>
+          : c.currentHp === 0
+            ? <span title={`Downed — ${c.deathSaves.successes}S / ${c.deathSaves.failures}F`} className="text-red-400 text-xs">💀 {c.deathSaves.successes}S / {c.deathSaves.failures}F</span>
+            : null}
+        {c.conditions.map(cond => {
+          const icon = CONDITION_ICONS[cond.name.toLowerCase()]
+          return (
+            <span key={cond.name} title={`${cond.name}${cond.roundsRemaining !== null ? ` (${cond.roundsRemaining}r)` : ''}`}
+              className="text-base leading-none cursor-default select-none">
+              {icon ?? <span className="text-amber-400 text-xs">{cond.name}</span>}
+            </span>
+          )
+        })}
         {c.pushSubscription && <span className="text-emerald-600 text-xs">● push</span>}
       </div>
 
@@ -253,13 +389,13 @@ function CharacterCard({ character: c, onRefresh }: { character: Character; onRe
           </div>
         )}
         <div className="flex gap-2 items-center">
-          <input type="number" min={1} placeholder="Award XP" value={xpInput}
+          <input type="number" placeholder="+/- XP" value={xpInput}
             onChange={e => setXpInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') void handleAwardXp() }}
             className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm font-mono focus:outline-none focus:border-violet-500" />
           <button onClick={() => void handleAwardXp()}
             className="bg-violet-800 hover:bg-violet-700 text-violet-100 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">
-            +XP
+            {parseInt(xpInput, 10) < 0 ? '−XP' : '+XP'}
           </button>
           {c.pushSubscription && (
             <button onClick={() => setShowWhisper(v => !v)}
@@ -281,18 +417,104 @@ function CharacterCard({ character: c, onRefresh }: { character: Character; onRe
           </div>
         )}
       </div>
+
+      {/* Edit stats */}
+      <div className="border-t border-stone-800/50 pt-3">
+        {showStatEdit ? (
+          <div className="space-y-2">
+            <p className="text-xs text-stone-500 uppercase tracking-wider">Edit Stats</p>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <p className="text-xs text-stone-600 mb-1">Max HP</p>
+                <input type="number" value={maxHpInput} onChange={e => setMaxHpInput(e.target.value)}
+                  className="w-full bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm font-mono text-center focus:outline-none focus:border-emerald-500" />
+              </div>
+              <div>
+                <p className="text-xs text-stone-600 mb-1">Current HP</p>
+                <input type="number" value={currentHpInput} onChange={e => setCurrentHpInput(e.target.value)}
+                  className="w-full bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm font-mono text-center focus:outline-none focus:border-emerald-500" />
+              </div>
+              <div>
+                <p className="text-xs text-stone-600 mb-1">AC</p>
+                <input type="number" value={acInput} onChange={e => setAcInput(e.target.value)}
+                  className="w-full bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm font-mono text-center focus:outline-none focus:border-emerald-500" />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => void handleSaveStats()}
+                className="flex-1 bg-emerald-800 hover:bg-emerald-700 text-emerald-100 text-xs font-medium py-1.5 rounded-lg transition-colors">
+                Save Stats
+              </button>
+              <button onClick={() => { setShowStatEdit(false); setMaxHpInput(String(c.maxHp)); setCurrentHpInput(String(c.currentHp)); setAcInput(String(c.armorClass)) }}
+                className="text-stone-500 hover:text-stone-300 text-xs px-3 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setShowStatEdit(true)}
+            className="text-xs text-stone-600 hover:text-stone-400 transition-colors">
+            Edit stats (HP / AC)
+          </button>
+        )}
+      </div>
+
+      {/* Conditions toggle panel */}
+      <div className="border-t border-stone-800/50 pt-3">
+        <div className="flex items-center justify-between mb-2">
+          <button onClick={() => setShowConditions(v => !v)}
+            className="text-xs text-stone-600 hover:text-stone-400 transition-colors">
+            {showConditions ? 'Hide conditions' : 'Conditions'}
+          </button>
+          {c.conditions.length > 0 && !showConditions && (
+            <div className="flex flex-wrap gap-0.5">
+              {c.conditions.map(cond => (
+                <span key={cond.name} className="text-sm leading-none" title={cond.name}>
+                  {CONDITION_ICONS[cond.name.toLowerCase()] ?? <span className="text-amber-400 text-xs">{cond.name}</span>}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        {showConditions && (
+          <div className="grid grid-cols-5 gap-1.5">
+            {STANDARD_CONDITIONS.map(name => {
+              const isActive = c.conditions.some(cond => cond.name.toLowerCase() === name)
+              return (
+                <button
+                  key={name}
+                  onClick={() => void handleToggleCondition(name)}
+                  title={name.charAt(0).toUpperCase() + name.slice(1)}
+                  className={`flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-lg border transition-colors ${
+                    isActive
+                      ? 'border-amber-500 bg-amber-950/50 text-amber-300'
+                      : 'border-stone-700 bg-stone-800 text-stone-500 hover:border-stone-500 hover:text-stone-300'
+                  }`}
+                >
+                  <span className="text-base leading-none">{CONDITION_ICONS[name]}</span>
+                  <span className="leading-none truncate w-full text-center" style={{ fontSize: '0.6rem' }}>
+                    {name.charAt(0).toUpperCase() + name.slice(1)}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
 // ── Combat Tab ────────────────────────────────────────────────────────────────
 
-function CombatTab({ campaignId, characters, session, onSessionChange, onRosterRefresh }: {
+function CombatTab({ campaignId, characters, session, onSessionChange, onRosterRefresh, initiativeRequest, onInitiativeRequestChange }: {
   campaignId: string
   characters: Character[]
   session: CombatSession | null
   onSessionChange: (s: CombatSession | null) => void
   onRosterRefresh: () => void
+  initiativeRequest: InitiativeRequest | null
+  onInitiativeRequestChange: (r: InitiativeRequest | null) => void
 }) {
   const [initiativeInputs, setInitiativeInputs] = useState<Record<string, string>>({})
   const [selectedCharId, setSelectedCharId] = useState<string | null>(null)
@@ -301,6 +523,38 @@ function CombatTab({ campaignId, characters, session, onSessionChange, onRosterR
   const [conditionRounds, setConditionRounds] = useState('')
   const [showConditionForm, setShowConditionForm] = useState(false)
   const [loading, setLoading] = useState(false)
+
+  // Auto-fill initiative inputs when player rolls arrive via Realtime
+  useEffect(() => {
+    if (!initiativeRequest) return
+    setInitiativeInputs(prev => {
+      const next = { ...prev }
+      for (const [charId, roll] of Object.entries(initiativeRequest.rolls)) {
+        next[charId] = String(roll)
+      }
+      return next
+    })
+  }, [initiativeRequest])
+
+  async function handleRequestInitiative() {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/initiative/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId }),
+      })
+      const data: unknown = await res.json()
+      if (isInitiativeRequestApiResponse(data)) onInitiativeRequestChange(data.request)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleCancelInitiativeRequest() {
+    await fetch(`/api/initiative/request?campaignId=${campaignId}`, { method: 'DELETE' })
+    onInitiativeRequestChange(null)
+  }
 
   async function handleStartCombat() {
     const order = characters
@@ -312,13 +566,19 @@ function CombatTab({ campaignId, characters, session, onSessionChange, onRosterR
       .sort((a, b) => b.initiative - a.initiative)
     setLoading(true)
     try {
-      const res = await fetch('/api/combat/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId, initiativeOrder: order }),
-      })
-      const data: unknown = await res.json()
+      const [combatRes] = await Promise.all([
+        fetch('/api/combat/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ campaignId, initiativeOrder: order }),
+        }),
+        initiativeRequest
+          ? fetch(`/api/initiative/request?campaignId=${campaignId}`, { method: 'DELETE' })
+          : Promise.resolve(new Response()),
+      ])
+      const data: unknown = await combatRes.json()
       if (isStartCombatResponse(data)) onSessionChange(data.session)
+      onInitiativeRequestChange(null)
     } finally {
       setLoading(false)
     }
@@ -430,9 +690,47 @@ function CombatTab({ campaignId, characters, session, onSessionChange, onRosterR
     }
     return (
       <div className="space-y-5">
+        {/* Initiative request section */}
+        {!initiativeRequest ? (
+          <button
+            onClick={() => void handleRequestInitiative()}
+            disabled={loading}
+            className="w-full bg-stone-800 hover:bg-stone-700 disabled:opacity-50 border border-stone-700 text-stone-300 text-sm font-medium py-2.5 px-4 rounded-xl transition-colors"
+          >
+            🎲 Request Rolls from Players
+          </button>
+        ) : (
+          <div className="bg-stone-900 border border-amber-700/40 rounded-xl px-4 py-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-amber-400 font-medium">Waiting for initiative rolls…</p>
+              <button
+                onClick={() => void handleCancelInitiativeRequest()}
+                className="text-xs text-stone-600 hover:text-stone-400 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {characters.map(c => {
+                const rolled = initiativeRequest.rolls[c.id] !== undefined
+                return (
+                  <span key={c.id} className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${
+                    rolled ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-800/50' : 'bg-stone-800 text-stone-500 border border-stone-700'
+                  }`}>
+                    {rolled ? '✓' : '…'} {c.characterName}
+                    {rolled && <span className="font-mono font-bold ml-0.5">{initiativeRequest.rolls[c.id]}</span>}
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         <div>
           <p className="text-sm font-medium text-stone-300 mb-1">Initiative Order</p>
-          <p className="text-xs text-stone-500 mb-4">Enter each character's roll — higher goes first.</p>
+          <p className="text-xs text-stone-500 mb-4">
+            {initiativeRequest ? 'Player rolls auto-fill — adjust if needed.' : 'Enter each character\'s roll — higher goes first.'}
+          </p>
           <div className="space-y-2">
             {characters.map(c => (
               <div key={c.id} className="flex items-center gap-3 bg-stone-900 border border-stone-800 rounded-xl px-4 py-3">
@@ -440,6 +738,9 @@ function CombatTab({ campaignId, characters, session, onSessionChange, onRosterR
                   <p className="font-medium text-sm">{c.characterName}</p>
                   <p className="text-stone-500 text-xs">{c.class} · {c.playerName}</p>
                 </div>
+                {initiativeRequest?.rolls[c.id] !== undefined && (
+                  <span className="text-emerald-500 text-xs">✓</span>
+                )}
                 <input
                   type="number"
                   min={1}
@@ -520,9 +821,14 @@ function CombatTab({ campaignId, characters, session, onSessionChange, onRosterR
                     {isCurrentTurn && <span className="text-red-400 text-xs leading-none">▶</span>}
                     <p className={`font-medium text-sm ${isDowned ? 'text-red-400' : ''}`}>{char.characterName}</p>
                     {isDowned && <span className="text-xs text-red-500 font-semibold">DOWNED</span>}
-                    {char.conditions.length > 0 && (
-                      <span className="text-xs text-amber-400 truncate">{char.conditions.map(c => c.name).join(', ')}</span>
-                    )}
+                    {char.conditions.map(cond => {
+                      const icon = CONDITION_ICONS[cond.name.toLowerCase()]
+                      return (
+                        <span key={cond.name} title={cond.name} className="text-sm leading-none">
+                          {icon ?? <span className="text-amber-400 text-xs">{cond.name}</span>}
+                        </span>
+                      )
+                    })}
                   </div>
                   <div className="h-1 bg-stone-800 rounded-full overflow-hidden">
                     <div className={`h-full rounded-full transition-all ${hpColor}`} style={{ width: `${hpPercent}%` }} />
@@ -576,15 +882,19 @@ function CombatTab({ campaignId, characters, session, onSessionChange, onRosterR
                     </div>
                     {char.conditions.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mb-2">
-                        {char.conditions.map(cond => (
-                          <span key={cond.name} className="flex items-center gap-1 text-xs bg-amber-900/40 text-amber-300 px-2 py-0.5 rounded-full">
-                            {cond.name}{cond.roundsRemaining !== null ? ` (${cond.roundsRemaining}r)` : ''}
-                            <button
-                              onClick={() => void handleRemoveCondition(char.id, cond.name, char.conditions)}
-                              className="text-amber-500 hover:text-red-400 ml-0.5 leading-none"
-                            >×</button>
-                          </span>
-                        ))}
+                        {char.conditions.map(cond => {
+                          const icon = CONDITION_ICONS[cond.name.toLowerCase()]
+                          return (
+                            <span key={cond.name} className="flex items-center gap-1 text-xs bg-amber-900/40 text-amber-300 px-2 py-0.5 rounded-full">
+                              {icon && <span className="text-sm leading-none">{icon}</span>}
+                              {cond.name}{cond.roundsRemaining !== null ? ` (${cond.roundsRemaining}r)` : ''}
+                              <button
+                                onClick={() => void handleRemoveCondition(char.id, cond.name, char.conditions)}
+                                className="text-amber-500 hover:text-red-400 ml-0.5 leading-none"
+                              >×</button>
+                            </span>
+                          )
+                        })}
                       </div>
                     )}
                     {!showConditionForm && char.conditions.length === 0 && (
@@ -772,18 +1082,37 @@ function FateTab({ campaignId, characters }: { campaignId: string; characters: C
           {characters.length > 0 && (
             <div>
               <p className="text-sm font-medium text-stone-300 mb-2">Exclude from Pool</p>
-              <div className="flex flex-wrap gap-2">
-                {characters.map(c => (
-                  <button key={c.id} onClick={() => toggleExclude(c.id)}
-                    className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                      excluded.has(c.id)
-                        ? 'border-stone-600 bg-stone-800 text-stone-500 line-through'
-                        : 'border-stone-700 bg-stone-900 text-stone-300 hover:border-stone-500'
-                    }`}>
-                    {c.characterName}
-                  </button>
-                ))}
-              </div>
+              {(() => {
+                const activePool = characters.filter(c => !excluded.has(c.id))
+                const rawWeights = activePool.map(c => {
+                  const deficit = Math.max(0, 1 - c.currentHp / c.maxHp)
+                  return dangerWeighted ? Math.max(0.05, deficit * deficit) : 1
+                })
+                const totalW = rawWeights.reduce((a, b) => a + b, 0)
+                const probMap = new Map(activePool.map((c, i) => [c.id, totalW > 0 ? rawWeights[i] / totalW : 0]))
+                return (
+                  <div className="flex flex-wrap gap-2">
+                    {characters.map(c => (
+                      <button key={c.id} onClick={() => toggleExclude(c.id)}
+                        className={`text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${
+                          excluded.has(c.id)
+                            ? 'border-stone-600 bg-stone-800 text-stone-500 line-through'
+                            : 'border-stone-700 bg-stone-900 text-stone-300 hover:border-stone-500'
+                        }`}>
+                        {c.characterName}
+                        {dangerWeighted && !excluded.has(c.id) && (
+                          <span className={`font-mono ${
+                            (probMap.get(c.id) ?? 0) > 0.4 ? 'text-red-400' :
+                            (probMap.get(c.id) ?? 0) > 0.2 ? 'text-amber-400' : 'text-stone-500'
+                          }`}>
+                            {Math.round((probMap.get(c.id) ?? 0) * 100)}%
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )
+              })()}
             </div>
           )}
 
@@ -851,6 +1180,9 @@ function WorldTab({ campaignId, characters }: { campaignId: string; characters: 
   const [locations, setLocations] = useState<Location[]>([])
   const [sessionNotes, setSessionNotes] = useState<SessionNote[]>([])
   const [gold, setGold] = useState(0)
+  const [silver, setSilver] = useState(0)
+  const [copper, setCopper] = useState(0)
+  const [customCurrency, setCustomCurrency] = useState<CustomCurrencyEntry[]>([])
   const [sharedItems, setSharedItems] = useState<InventoryItem[]>([])
 
   const fetchNpcs = useCallback(async () => {
@@ -874,7 +1206,13 @@ function WorldTab({ campaignId, characters }: { campaignId: string; characters: 
   const fetchInventory = useCallback(async () => {
     const res = await fetch(`/api/world/inventory?campaignId=${campaignId}`)
     const data: unknown = await res.json()
-    if (isInventoryResponse(data)) { setGold(data.gold); setSharedItems(data.sharedItems) }
+    if (isInventoryResponse(data)) {
+      setGold(data.gold)
+      setSilver(data.silver ?? 0)
+      setCopper(data.copper ?? 0)
+      setCustomCurrency(data.customCurrency ?? [])
+      setSharedItems(data.sharedItems)
+    }
   }, [campaignId])
 
   useEffect(() => {
@@ -905,7 +1243,8 @@ function WorldTab({ campaignId, characters }: { campaignId: string; characters: 
       {worldTab === 'inventory' && (
         <InventorySection
           campaignId={campaignId} characters={characters}
-          gold={gold} sharedItems={sharedItems}
+          gold={gold} silver={silver} copper={copper} customCurrency={customCurrency}
+          sharedItems={sharedItems}
           onRefresh={fetchInventory}
         />
       )}
@@ -1179,24 +1518,87 @@ function LocationsSection({ campaignId, locations, onRefresh }: {
 
 // ── Inventory Section ─────────────────────────────────────────────────────────
 
-function InventorySection({ campaignId, characters, gold, sharedItems, onRefresh }: {
-  campaignId: string; characters: Character[]; gold: number; sharedItems: InventoryItem[]; onRefresh: () => void
+type CoinDenom = 'gold' | 'silver' | 'copper'
+
+function CoinRow({
+  label, abbr, color, amount,
+  onDelta, onSet,
+}: {
+  label: string; abbr: string; color: string; amount: number
+  onDelta: (d: number) => void; onSet: (v: number) => void
 }) {
-  const [goldInput, setGoldInput] = useState('')
-  const [editingGold, setEditingGold] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [input, setInput] = useState('')
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`text-xs font-medium w-6 text-right ${color}`}>{abbr}</span>
+      <button onClick={() => onDelta(-10)} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">−10</button>
+      <button onClick={() => onDelta(-1)} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">−1</button>
+      {editing ? (
+        <input type="number" value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { onSet(parseInt(input, 10) || 0); setEditing(false) } if (e.key === 'Escape') setEditing(false) }}
+          onBlur={() => { onSet(parseInt(input, 10) || 0); setEditing(false) }}
+          autoFocus
+          className="w-20 bg-stone-800 border border-amber-500 rounded px-2 py-0.5 text-center text-sm font-mono font-bold focus:outline-none" />
+      ) : (
+        <button onClick={() => { setInput(String(amount)); setEditing(true) }}
+          className={`w-20 text-center text-lg font-bold tabular-nums ${color}`}>
+          {amount.toLocaleString()}
+        </button>
+      )}
+      <button onClick={() => onDelta(1)} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">+1</button>
+      <button onClick={() => onDelta(10)} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">+10</button>
+      <span className="text-xs text-stone-600">{label}</span>
+    </div>
+  )
+}
+
+function InventorySection({ campaignId, characters, gold, silver, copper, customCurrency, sharedItems, onRefresh }: {
+  campaignId: string
+  characters: Character[]
+  gold: number; silver: number; copper: number
+  customCurrency: CustomCurrencyEntry[]
+  sharedItems: InventoryItem[]
+  onRefresh: () => void
+}) {
   const [newItem, setNewItem] = useState({ name: '', quantity: '1', notes: '' })
   const [showItemForm, setShowItemForm] = useState(false)
   const [lootInputs, setLootInputs] = useState<Record<string, { name: string; quantity: string }>>({})
   const [expandedChar, setExpandedChar] = useState<string | null>(null)
+  const [newCustomName, setNewCustomName] = useState('')
+  const [newCustomAmount, setNewCustomAmount] = useState('0')
+  const [showCustomForm, setShowCustomForm] = useState(false)
+  const [charCoinInputs, setCharCoinInputs] = useState<Record<string, { gold: number; silver: number; copper: number; custom: CustomCurrencyEntry[] }>>({})
+  const [charNewCustom, setCharNewCustom] = useState<Record<string, { name: string; amount: string }>>({})
 
-  async function handleGoldUpdate(delta?: number) {
-    const newGold = delta !== undefined ? Math.max(0, gold + delta) : Math.max(0, parseInt(goldInput, 10) || 0)
+  function getCharCoins(char: Character) {
+    return charCoinInputs[char.id] ?? { gold: char.gold, silver: char.silver, copper: char.copper, custom: char.customCurrency }
+  }
+
+  async function savePartyCoins(overrides: { gold?: number; silver?: number; copper?: number; customCurrency?: CustomCurrencyEntry[] }) {
     await fetch('/api/world/inventory', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ campaignId, gold: newGold, sharedItems }),
+      body: JSON.stringify({
+        campaignId,
+        gold: overrides.gold ?? gold,
+        silver: overrides.silver ?? silver,
+        copper: overrides.copper ?? copper,
+        customCurrency: overrides.customCurrency ?? customCurrency,
+        sharedItems,
+      }),
     })
-    setEditingGold(false); setGoldInput(''); onRefresh()
+    onRefresh()
+  }
+
+  async function saveCharCoins(char: Character, coins: { gold: number; silver: number; copper: number; custom: CustomCurrencyEntry[] }) {
+    await fetch('/api/characters/currency', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId: char.id, gold: coins.gold, silver: coins.silver, copper: coins.copper, customCurrency: coins.custom }),
+    })
+    onRefresh()
   }
 
   async function handleAddItem() {
@@ -1205,7 +1607,7 @@ function InventorySection({ campaignId, characters, gold, sharedItems, onRefresh
     await fetch('/api/world/inventory', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ campaignId, gold, sharedItems: [...sharedItems, item] }),
+      body: JSON.stringify({ campaignId, gold, silver, copper, customCurrency, sharedItems: [...sharedItems, item] }),
     })
     setNewItem({ name: '', quantity: '1', notes: '' }); setShowItemForm(false); onRefresh()
   }
@@ -1215,7 +1617,7 @@ function InventorySection({ campaignId, characters, gold, sharedItems, onRefresh
     await fetch('/api/world/inventory', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ campaignId, gold, sharedItems: updated }),
+      body: JSON.stringify({ campaignId, gold, silver, copper, customCurrency, sharedItems: updated }),
     })
     onRefresh()
   }
@@ -1244,27 +1646,49 @@ function InventorySection({ campaignId, characters, gold, sharedItems, onRefresh
 
   return (
     <div className="space-y-5">
-      {/* Gold */}
-      <div className="bg-stone-900 border border-stone-800 rounded-xl p-4">
-        <p className="text-xs text-stone-500 uppercase tracking-widest mb-3">Party Gold</p>
-        <div className="flex items-center gap-3">
-          <button onClick={() => void handleGoldUpdate(-10)} className="w-8 h-8 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-sm transition-colors">−10</button>
-          <button onClick={() => void handleGoldUpdate(-1)} className="w-8 h-8 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-sm transition-colors">−1</button>
-          {editingGold ? (
-            <input type="number" value={goldInput} onChange={e => setGoldInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') void handleGoldUpdate() }}
-              onBlur={() => void handleGoldUpdate()}
-              autoFocus
-              className="flex-1 bg-stone-800 border border-amber-500 rounded-lg px-3 py-1.5 text-center text-xl font-bold font-mono focus:outline-none" />
-          ) : (
-            <button onClick={() => { setGoldInput(String(gold)); setEditingGold(true) }}
-              className="flex-1 text-center text-3xl font-bold text-amber-400 tabular-nums">
-              {gold.toLocaleString()} <span className="text-xs text-stone-500 font-normal">gp</span>
-            </button>
-          )}
-          <button onClick={() => void handleGoldUpdate(1)} className="w-8 h-8 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-sm transition-colors">+1</button>
-          <button onClick={() => void handleGoldUpdate(10)} className="w-8 h-8 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 text-sm transition-colors">+10</button>
-        </div>
+      {/* Party coins */}
+      <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-3">
+        <p className="text-xs text-stone-500 uppercase tracking-widest">Party Wallet</p>
+        <CoinRow label="gold" abbr="gp" color="text-amber-400" amount={gold}
+          onDelta={d => void savePartyCoins({ gold: gold + d })}
+          onSet={v => void savePartyCoins({ gold: v })} />
+        <CoinRow label="silver" abbr="sp" color="text-slate-300" amount={silver}
+          onDelta={d => void savePartyCoins({ silver: silver + d })}
+          onSet={v => void savePartyCoins({ silver: v })} />
+        <CoinRow label="copper" abbr="cp" color="text-orange-400" amount={copper}
+          onDelta={d => void savePartyCoins({ copper: copper + d })}
+          onSet={v => void savePartyCoins({ copper: v })} />
+
+        {/* Custom currency */}
+        {customCurrency.map((entry, idx) => (
+          <div key={idx} className="flex items-center gap-2">
+            <span className="text-xs font-medium w-6 text-right text-violet-400 truncate">{entry.name.slice(0, 3)}</span>
+            <button onClick={() => void savePartyCoins({ customCurrency: customCurrency.map((e, i) => i === idx ? { ...e, amount: e.amount - 10 } : e) })} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">−10</button>
+            <button onClick={() => void savePartyCoins({ customCurrency: customCurrency.map((e, i) => i === idx ? { ...e, amount: e.amount - 1 } : e) })} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">−1</button>
+            <span className="w-20 text-center text-lg font-bold tabular-nums text-violet-300">{entry.amount.toLocaleString()}</span>
+            <button onClick={() => void savePartyCoins({ customCurrency: customCurrency.map((e, i) => i === idx ? { ...e, amount: e.amount + 1 } : e) })} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">+1</button>
+            <button onClick={() => void savePartyCoins({ customCurrency: customCurrency.map((e, i) => i === idx ? { ...e, amount: e.amount + 10 } : e) })} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">+10</button>
+            <span className="text-xs text-stone-400 flex-1">{entry.name}</span>
+            <button onClick={() => void savePartyCoins({ customCurrency: customCurrency.filter((_, i) => i !== idx) })} className="text-stone-700 hover:text-red-500 text-xs transition-colors">✕</button>
+          </div>
+        ))}
+
+        {showCustomForm ? (
+          <div className="flex gap-2 items-center pt-1">
+            <input placeholder="Currency name" value={newCustomName} onChange={e => setNewCustomName(e.target.value)}
+              className="flex-1 bg-stone-800 border border-stone-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500" />
+            <input type="number" min={0} placeholder="0" value={newCustomAmount} onChange={e => setNewCustomAmount(e.target.value)}
+              className="w-16 bg-stone-800 border border-stone-700 rounded px-2 py-1 text-sm text-center font-mono focus:outline-none focus:border-violet-500" />
+            <button onClick={() => {
+              if (!newCustomName.trim()) return
+              void savePartyCoins({ customCurrency: [...customCurrency, { name: newCustomName.trim(), amount: parseInt(newCustomAmount, 10) || 0 }] })
+              setNewCustomName(''); setNewCustomAmount('0'); setShowCustomForm(false)
+            }} className="bg-violet-800 hover:bg-violet-700 text-xs text-violet-100 px-3 py-1 rounded transition-colors">Add</button>
+            <button onClick={() => setShowCustomForm(false)} className="text-stone-500 hover:text-stone-300 text-xs transition-colors">Cancel</button>
+          </div>
+        ) : (
+          <button onClick={() => setShowCustomForm(true)} className="text-xs text-stone-600 hover:text-violet-400 transition-colors">+ Custom currency</button>
+        )}
       </div>
 
       {/* Shared items */}
@@ -1297,56 +1721,117 @@ function InventorySection({ campaignId, characters, gold, sharedItems, onRefresh
             </div>
           </div>
         ) : (
-          <button onClick={() => setShowItemForm(true)}
-            className="mt-2 text-xs text-stone-500 hover:text-amber-400 transition-colors">
-            + Add item
-          </button>
+          <button onClick={() => setShowItemForm(true)} className="mt-2 text-xs text-stone-500 hover:text-amber-400 transition-colors">+ Add item</button>
         )}
       </div>
 
-      {/* Character loot */}
+      {/* Character wallets + loot */}
       {characters.length > 0 && (
         <div>
-          <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Individual Loot</p>
+          <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Characters</p>
           <div className="space-y-2">
-            {characters.map(char => (
-              <div key={char.id} className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
-                <button onClick={() => setExpandedChar(expandedChar === char.id ? null : char.id)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 text-left">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">{char.characterName}</span>
-                    {char.loot.length > 0 && (
-                      <span className="text-xs text-stone-500">{char.loot.length} item{char.loot.length !== 1 ? 's' : ''}</span>
-                    )}
-                  </div>
-                  <span className="text-stone-600 text-xs">{expandedChar === char.id ? '▲' : '▼'}</span>
-                </button>
-                {expandedChar === char.id && (
-                  <div className="border-t border-stone-800 px-4 py-3 space-y-2">
-                    {char.loot.map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-2 text-sm">
-                        <span className="text-stone-500 font-mono text-xs">{item.quantity}×</span>
-                        <span className="flex-1">{item.name}</span>
-                        <button onClick={() => void handleRemoveLoot(char, idx)} className="text-stone-700 hover:text-red-500 text-xs transition-colors">✕</button>
-                      </div>
-                    ))}
-                    {char.loot.length === 0 && <p className="text-xs text-stone-600 italic">No loot</p>}
-                    <div className="flex gap-2 pt-1">
-                      <input placeholder="Item name" value={lootInputs[char.id]?.name ?? ''}
-                        onChange={e => setLootInputs(p => ({ ...p, [char.id]: { ...p[char.id], name: e.target.value } }))}
-                        className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-amber-500" />
-                      <input type="number" min={1} placeholder="Qty" value={lootInputs[char.id]?.quantity ?? '1'}
-                        onChange={e => setLootInputs(p => ({ ...p, [char.id]: { ...p[char.id], quantity: e.target.value } }))}
-                        className="w-14 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm text-center font-mono focus:outline-none focus:border-amber-500" />
-                      <button onClick={() => void handleAddLoot(char)}
-                        className="bg-stone-700 hover:bg-stone-600 text-stone-200 text-sm px-3 py-1.5 rounded-lg transition-colors">
-                        Add
-                      </button>
+            {characters.map(char => {
+              const coins = getCharCoins(char)
+              const totalItems = char.loot.length
+              const hasCoins = coins.gold + coins.silver + coins.copper + coins.custom.length > 0
+              return (
+                <div key={char.id} className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
+                  <button onClick={() => setExpandedChar(expandedChar === char.id ? null : char.id)}
+                    className="w-full flex items-center justify-between px-4 py-2.5 text-left">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium">{char.characterName}</span>
+                      {hasCoins && <span className="text-xs text-amber-600">{coins.gold}gp {coins.silver}sp {coins.copper}cp</span>}
+                      {totalItems > 0 && <span className="text-xs text-stone-500">{totalItems} item{totalItems !== 1 ? 's' : ''}</span>}
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                    <span className="text-stone-600 text-xs">{expandedChar === char.id ? '▲' : '▼'}</span>
+                  </button>
+                  {expandedChar === char.id && (
+                    <div className="border-t border-stone-800 px-4 py-3 space-y-4">
+                      {/* Coins */}
+                      <div className="space-y-2">
+                        <p className="text-xs text-stone-600 uppercase tracking-widest">Coin</p>
+                        {(['gold', 'silver', 'copper'] as CoinDenom[]).map(denom => {
+                          const colorMap: Record<CoinDenom, string> = { gold: 'text-amber-400', silver: 'text-slate-300', copper: 'text-orange-400' }
+                          const abbrMap: Record<CoinDenom, string> = { gold: 'gp', silver: 'sp', copper: 'cp' }
+                          return (
+                            <CoinRow key={denom} label={denom} abbr={abbrMap[denom]} color={colorMap[denom]} amount={coins[denom]}
+                              onDelta={d => {
+                                const updated = { ...coins, [denom]: coins[denom] + d }
+                                setCharCoinInputs(p => ({ ...p, [char.id]: updated }))
+                                void saveCharCoins(char, updated)
+                              }}
+                              onSet={v => {
+                                const updated = { ...coins, [denom]: v }
+                                setCharCoinInputs(p => ({ ...p, [char.id]: updated }))
+                                void saveCharCoins(char, updated)
+                              }} />
+                          )
+                        })}
+
+                        {/* Character custom currency */}
+                        {coins.custom.map((entry, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <span className="text-xs font-medium w-6 text-right text-violet-400 truncate">{entry.name.slice(0, 3)}</span>
+                            <button onClick={() => { const u = { ...coins, custom: coins.custom.map((e, i) => i === idx ? { ...e, amount: e.amount - 10 } : e) }; setCharCoinInputs(p => ({ ...p, [char.id]: u })); void saveCharCoins(char, u) }} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">−10</button>
+                            <button onClick={() => { const u = { ...coins, custom: coins.custom.map((e, i) => i === idx ? { ...e, amount: e.amount - 1 } : e) }; setCharCoinInputs(p => ({ ...p, [char.id]: u })); void saveCharCoins(char, u) }} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">−1</button>
+                            <span className="w-20 text-center text-base font-bold tabular-nums text-violet-300">{entry.amount.toLocaleString()}</span>
+                            <button onClick={() => { const u = { ...coins, custom: coins.custom.map((e, i) => i === idx ? { ...e, amount: e.amount + 1 } : e) }; setCharCoinInputs(p => ({ ...p, [char.id]: u })); void saveCharCoins(char, u) }} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">+1</button>
+                            <button onClick={() => { const u = { ...coins, custom: coins.custom.map((e, i) => i === idx ? { ...e, amount: e.amount + 10 } : e) }; setCharCoinInputs(p => ({ ...p, [char.id]: u })); void saveCharCoins(char, u) }} className="w-7 h-7 rounded bg-stone-800 hover:bg-stone-700 text-stone-400 text-xs transition-colors">+10</button>
+                            <span className="text-xs text-stone-400 flex-1">{entry.name}</span>
+                            <button onClick={() => { const u = { ...coins, custom: coins.custom.filter((_, i) => i !== idx) }; setCharCoinInputs(p => ({ ...p, [char.id]: u })); void saveCharCoins(char, u) }} className="text-stone-700 hover:text-red-500 text-xs transition-colors">✕</button>
+                          </div>
+                        ))}
+
+                        {(() => {
+                          const customInput = charNewCustom[char.id]
+                          return customInput ? (
+                            <div className="flex gap-2 items-center">
+                              <input placeholder="Name" value={customInput.name} onChange={e => setCharNewCustom(p => ({ ...p, [char.id]: { ...p[char.id], name: e.target.value } }))}
+                                className="flex-1 bg-stone-800 border border-stone-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500" />
+                              <input type="number" min={0} placeholder="0" value={customInput.amount} onChange={e => setCharNewCustom(p => ({ ...p, [char.id]: { ...p[char.id], amount: e.target.value } }))}
+                                className="w-14 bg-stone-800 border border-stone-700 rounded px-2 py-1 text-sm text-center font-mono focus:outline-none focus:border-violet-500" />
+                              <button onClick={() => {
+                                if (!customInput.name.trim()) return
+                                const u = { ...coins, custom: [...coins.custom, { name: customInput.name.trim(), amount: parseInt(customInput.amount, 10) || 0 }] }
+                                setCharCoinInputs(p => ({ ...p, [char.id]: u }))
+                                setCharNewCustom(p => { const n = { ...p }; delete n[char.id]; return n })
+                                void saveCharCoins(char, u)
+                              }} className="bg-violet-800 hover:bg-violet-700 text-xs text-violet-100 px-2 py-1 rounded transition-colors">Add</button>
+                              <button onClick={() => setCharNewCustom(p => { const n = { ...p }; delete n[char.id]; return n })} className="text-stone-500 hover:text-stone-300 text-xs transition-colors">✕</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => setCharNewCustom(p => ({ ...p, [char.id]: { name: '', amount: '0' } }))} className="text-xs text-stone-600 hover:text-violet-400 transition-colors">+ Custom</button>
+                          )
+                        })()}
+                      </div>
+
+                      {/* Loot items */}
+                      <div className="space-y-1.5">
+                        <p className="text-xs text-stone-600 uppercase tracking-widest">Loot</p>
+                        {char.loot.map((item, idx) => (
+                          <div key={idx} className="flex items-center gap-2 text-sm">
+                            <span className="text-stone-500 font-mono text-xs">{item.quantity}×</span>
+                            <span className="flex-1">{item.name}</span>
+                            <button onClick={() => void handleRemoveLoot(char, idx)} className="text-stone-700 hover:text-red-500 text-xs transition-colors">✕</button>
+                          </div>
+                        ))}
+                        {char.loot.length === 0 && <p className="text-xs text-stone-600 italic">No loot</p>}
+                        <div className="flex gap-2 pt-1">
+                          <input placeholder="Item name" value={lootInputs[char.id]?.name ?? ''}
+                            onChange={e => setLootInputs(p => ({ ...p, [char.id]: { ...p[char.id], name: e.target.value } }))}
+                            className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-amber-500" />
+                          <input type="number" min={1} placeholder="Qty" value={lootInputs[char.id]?.quantity ?? '1'}
+                            onChange={e => setLootInputs(p => ({ ...p, [char.id]: { ...p[char.id], quantity: e.target.value } }))}
+                            className="w-14 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm text-center font-mono focus:outline-none focus:border-amber-500" />
+                          <button onClick={() => void handleAddLoot(char)}
+                            className="bg-stone-700 hover:bg-stone-600 text-stone-200 text-sm px-3 py-1.5 rounded-lg transition-colors">Add</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -1469,6 +1954,128 @@ function DicePanel({ history, onRoll }: { history: RollEntry[]; onRoll: (e: Roll
   )
 }
 
+// ── Quest Generator ───────────────────────────────────────────────────────────
+
+type QuestResult = {
+  type: string; giver: string; target: string
+  location: string; complication: string; reward: string
+}
+
+const QUEST_TABLES = {
+  types: ['Rescue','Retrieve','Investigate','Eliminate','Escort','Deliver','Explore','Defend','Infiltrate','Negotiate'],
+  givers: [
+    'A desperate innkeeper','A cloaked noble','A young shepherd','An elderly wizard',
+    'A merchant guild rep','A haunted soldier','A mysterious stranger','The local magistrate',
+    'A grieving widow','A reformed thief','A traveling bard','A temple priest',
+    'A worried farmer','A ship captain','A blind oracle','A child with a strange map',
+  ],
+  targets: [
+    'a stolen artifact','a missing person','an ancient relic','a powerful creature',
+    'a dangerous criminal','a corrupt official','a cursed object','a lost shipment',
+    'a cache of weapons','a group of refugees','a forbidden tome','a kidnapped heir',
+    'a family heirloom','a monster haunting the roads','a spy within the city',
+    'a portal that should not exist',
+  ],
+  locations: [
+    'the ruins north of town','deep in the Ashwood Forest','an abandoned mine',
+    'a crumbling castle','the sewers beneath the city','a remote mountain pass',
+    'a sunken temple','the black market district','an island across the bay',
+    'a rival town three days ride away','the cursed swamplands','a hidden valley',
+    'a dwarven stronghold','the edge of the known map','a haunted lighthouse',
+    'a ship anchored in the fog',
+  ],
+  complications: [
+    'but the quest giver is hiding something',
+    'but a rival faction wants the same thing',
+    'but time is critically short',
+    'but the target is not what it seems',
+    'but an old enemy is involved',
+    'but innocents will be caught in the crossfire',
+    'but magic in the area behaves strangely',
+    'but a powerful NPC actively opposes them',
+    'but the reward comes with strings attached',
+    'but one party member has a personal connection to it',
+    'but the information they were given was wrong',
+    'but someone in town is already watching them',
+    'but the path is far more dangerous than described',
+    'but the situation has already changed hands once',
+    'but what they find there changes everything',
+    'but they are not the only ones who were hired',
+  ],
+  rewards: [
+    '100 gp and local renown','a rare magical item','a noble\'s political favor',
+    'a deed to a small property','guild membership','200 gp',
+    'a powerful new ally','intelligence on a greater threat','a ship and loyal crew',
+    'a debt or past crime forgiven','a legendary weapon','access to forbidden knowledge',
+    '500 gp and a minor title','a trained exotic mount','a map to greater treasure',
+    'safe passage through dangerous territory',
+  ],
+}
+
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]
+}
+
+function buildQuest(): QuestResult {
+  return {
+    type: pickRandom(QUEST_TABLES.types),
+    giver: pickRandom(QUEST_TABLES.givers),
+    target: pickRandom(QUEST_TABLES.targets),
+    location: pickRandom(QUEST_TABLES.locations),
+    complication: pickRandom(QUEST_TABLES.complications),
+    reward: pickRandom(QUEST_TABLES.rewards),
+  }
+}
+
+function QuestGenerator() {
+  const [quest, setQuest] = useState<QuestResult | null>(null)
+
+  const rows: { key: keyof QuestResult; label: string; table: (typeof QUEST_TABLES)[keyof typeof QUEST_TABLES] }[] = [
+    { key: 'type',         label: 'Type',      table: QUEST_TABLES.types },
+    { key: 'giver',        label: 'Given by',  table: QUEST_TABLES.givers },
+    { key: 'target',       label: 'Objective', table: QUEST_TABLES.targets },
+    { key: 'location',     label: 'Location',  table: QUEST_TABLES.locations },
+    { key: 'complication', label: 'Twist',     table: QUEST_TABLES.complications },
+    { key: 'reward',       label: 'Reward',    table: QUEST_TABLES.rewards },
+  ]
+
+  return (
+    <div>
+      <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Quest Generator</p>
+      {quest ? (
+        <div className="bg-stone-900 border border-amber-900/30 rounded-xl p-4 space-y-2.5">
+          {rows.map(({ key, label, table }) => (
+            <div key={key} className="flex items-start gap-2">
+              <span className="text-xs text-stone-500 w-20 shrink-0 pt-0.5">{label}</span>
+              <span className="text-sm text-stone-200 flex-1 leading-snug">{quest[key]}</span>
+              <button
+                onClick={() => setQuest(q => q ? { ...q, [key]: pickRandom(table) } : q)}
+                className="text-stone-600 hover:text-amber-400 text-xs transition-colors shrink-0 pt-0.5"
+                title={`Re-roll ${label}`}
+              >↺</button>
+            </div>
+          ))}
+          <div className="flex gap-2 pt-2 border-t border-stone-800">
+            <button onClick={() => setQuest(buildQuest())}
+              className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-xs font-medium py-1.5 rounded-lg transition-colors">
+              New Quest
+            </button>
+            <button onClick={() => setQuest(null)}
+              className="text-stone-500 hover:text-stone-300 text-xs px-3 transition-colors">
+              Clear
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setQuest(buildQuest())}
+          className="w-full border border-dashed border-amber-800/50 rounded-xl py-3 text-sm text-amber-600 hover:text-amber-400 hover:border-amber-700 transition-colors">
+          ✦ Generate Quest
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── Tables Section ────────────────────────────────────────────────────────────
 
 function TablesSection({ campaignId }: { campaignId: string }) {
@@ -1523,6 +2130,7 @@ function TablesSection({ campaignId }: { campaignId: string }) {
 
   return (
     <div className="space-y-4">
+      <QuestGenerator />
       {lastRoll && (
         <div className="bg-amber-950/30 border border-amber-800/40 rounded-xl px-4 py-3 flex items-center justify-between">
           <div>
@@ -1609,6 +2217,412 @@ function TablesSection({ campaignId }: { campaignId: string }) {
   )
 }
 
+// ── Encounter Gauge Tab ───────────────────────────────────────────────────────
+
+const DAMAGE_TYPES: DamageType[] = [
+  'acid', 'bludgeoning', 'cold', 'fire', 'force',
+  'lightning', 'necrotic', 'piercing', 'poison',
+  'psychic', 'radiant', 'slashing', 'thunder',
+]
+
+const CONDITION_IMMUNITY_TYPES: ConditionImmunityType[] = [
+  'blinded', 'charmed', 'deafened', 'exhaustion', 'frightened',
+  'grappled', 'incapacitated', 'invisible', 'paralyzed', 'petrified',
+  'poisoned', 'prone', 'restrained', 'stunned', 'unconscious',
+]
+
+const CR_OPTIONS = [
+  '0', '1/8', '1/4', '1/2',
+  '1', '2', '3', '4', '5', '6', '7', '8', '9', '10',
+  '11', '12', '13', '14', '15', '16', '17', '18', '19', '20',
+  '21', '22', '23', '24', '25', '26', '27', '28', '29', '30',
+]
+
+const ABILITY_KEYS: (keyof Monster['abilityScores'])[] = ['str', 'dex', 'con', 'int', 'wis', 'cha']
+
+function abilityMod(score: number): string {
+  const mod = Math.floor((score - 10) / 2)
+  return mod >= 0 ? `+${mod}` : `${mod}`
+}
+
+function defaultMonster(): Monster {
+  return {
+    name: '',
+    cr: '1',
+    hp: 10,
+    ac: 13,
+    speed: '30 ft.',
+    abilityScores: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+    skills: '',
+    damageImmunities: [],
+    conditionImmunities: [],
+    senses: '',
+    legendaryActions: false,
+    lairActions: false,
+    legendaryResistance: false,
+  }
+}
+
+function GaugeBar({ score }: { score: number }) {
+  const pct = ((score - 1) / 9) * 100
+  const barColor =
+    score <= 2 ? 'bg-emerald-500' :
+    score <= 3.5 ? 'bg-green-500' :
+    score <= 5 ? 'bg-yellow-500' :
+    score <= 6.5 ? 'bg-orange-500' :
+    score <= 7.5 ? 'bg-red-500' :
+    score <= 9 ? 'bg-red-700' :
+    'bg-stone-900'
+
+  return (
+    <div className="relative h-4 bg-stone-800 rounded-full overflow-hidden">
+      <div
+        className={`absolute inset-y-0 left-0 rounded-full transition-all duration-300 ${barColor}`}
+        style={{ width: `${pct}%` }}
+      />
+      <div className="absolute inset-0 flex items-center">
+        {[1,2,3,4,5,6,7,8,9,10].map(n => (
+          <div key={n} className="flex-1 flex justify-end pr-px">
+            {n < 10 && <div className="w-px h-2.5 bg-stone-950/40" />}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MonsterGroupForm({
+  group,
+  expanded,
+  onToggle,
+  onChange,
+  onRemove,
+}: {
+  group: MonsterGroup
+  expanded: boolean
+  onToggle: () => void
+  onChange: (updated: MonsterGroup) => void
+  onRemove: () => void
+}) {
+  const m = group.monster
+
+  function updateMonster(patch: Partial<Monster>) {
+    onChange({ ...group, monster: { ...m, ...patch } })
+  }
+
+  function toggleDmgImmunity(dt: DamageType) {
+    const next = m.damageImmunities.includes(dt)
+      ? m.damageImmunities.filter(x => x !== dt)
+      : [...m.damageImmunities, dt]
+    updateMonster({ damageImmunities: next })
+  }
+
+  function toggleCondImmunity(ct: ConditionImmunityType) {
+    const next = m.conditionImmunities.includes(ct)
+      ? m.conditionImmunities.filter(x => x !== ct)
+      : [...m.conditionImmunities, ct]
+    updateMonster({ conditionImmunities: next })
+  }
+
+  const inputCls = 'bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-amber-500'
+
+  return (
+    <div className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
+      {/* Row header */}
+      <div className="flex items-center gap-2 px-3 py-2.5">
+        <button onClick={onToggle} className="flex-1 flex items-center gap-3 text-left min-w-0">
+          <span className="text-stone-400 text-xs shrink-0">{expanded ? '▲' : '▼'}</span>
+          <span className="font-medium text-sm truncate">{m.name || 'Unnamed Monster'}</span>
+          <span className="text-stone-500 text-xs shrink-0">CR {m.cr}</span>
+          <span className="text-stone-500 text-xs shrink-0">AC {m.ac}</span>
+          <span className="text-stone-500 text-xs shrink-0">HP {m.hp}</span>
+        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-xs text-stone-500">×</span>
+          <input
+            type="number"
+            min={1}
+            max={99}
+            value={group.count}
+            onChange={e => onChange({ ...group, count: Math.max(1, parseInt(e.target.value) || 1) })}
+            className="w-12 text-center bg-stone-800 border border-stone-700 rounded-lg px-1 py-1 text-sm focus:outline-none focus:border-amber-500"
+          />
+        </div>
+        <button onClick={onRemove} className="text-stone-600 hover:text-red-500 text-sm transition-colors shrink-0">✕</button>
+      </div>
+
+      {/* Expanded stat block form */}
+      {expanded && (
+        <div className="border-t border-stone-800 px-3 py-3 space-y-3">
+          {/* Name / CR / HP / AC / Speed */}
+          <div className="grid grid-cols-2 gap-2">
+            <input placeholder="Monster name" value={m.name}
+              onChange={e => updateMonster({ name: e.target.value })}
+              className={`col-span-2 ${inputCls}`} />
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-stone-500 shrink-0">CR</label>
+              <select value={m.cr} onChange={e => updateMonster({ cr: e.target.value })}
+                className={`flex-1 ${inputCls}`}>
+                {CR_OPTIONS.map(cr => <option key={cr} value={cr}>{cr}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-stone-500 shrink-0">AC</label>
+              <input type="number" min={1} max={30} value={m.ac}
+                onChange={e => updateMonster({ ac: parseInt(e.target.value) || 0 })}
+                className={`flex-1 ${inputCls}`} />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-stone-500 shrink-0">HP</label>
+              <input type="number" min={1} value={m.hp}
+                onChange={e => updateMonster({ hp: parseInt(e.target.value) || 0 })}
+                className={`flex-1 ${inputCls}`} />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-stone-500 shrink-0">Speed</label>
+              <input placeholder="30 ft." value={m.speed}
+                onChange={e => updateMonster({ speed: e.target.value })}
+                className={`flex-1 ${inputCls}`} />
+            </div>
+          </div>
+
+          {/* Ability scores */}
+          <div>
+            <p className="text-xs text-stone-500 mb-1.5">Ability Scores</p>
+            <div className="grid grid-cols-6 gap-1.5 text-center">
+              {ABILITY_KEYS.map(key => (
+                <div key={key}>
+                  <p className="text-xs text-stone-500 uppercase mb-1">{key}</p>
+                  <input type="number" min={1} max={30} value={m.abilityScores[key]}
+                    onChange={e => updateMonster({ abilityScores: { ...m.abilityScores, [key]: parseInt(e.target.value) || 10 } })}
+                    className="w-full text-center bg-stone-800 border border-stone-700 rounded-lg py-1 text-sm focus:outline-none focus:border-amber-500" />
+                  <p className="text-xs text-stone-400 mt-0.5">{abilityMod(m.abilityScores[key])}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Skills & Senses */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-stone-500">Skills</label>
+              <input placeholder="Perception +5, Stealth +3…" value={m.skills}
+                onChange={e => updateMonster({ skills: e.target.value })}
+                className={`mt-1 w-full ${inputCls}`} />
+            </div>
+            <div>
+              <label className="text-xs text-stone-500">Senses</label>
+              <input placeholder="Darkvision 60 ft." value={m.senses}
+                onChange={e => updateMonster({ senses: e.target.value })}
+                className={`mt-1 w-full ${inputCls}`} />
+            </div>
+          </div>
+
+          {/* Damage immunities */}
+          <div>
+            <p className="text-xs text-stone-500 mb-1.5">Damage Immunities</p>
+            <div className="flex flex-wrap gap-1.5">
+              {DAMAGE_TYPES.map(dt => (
+                <button key={dt} onClick={() => toggleDmgImmunity(dt)}
+                  className={`text-xs px-2 py-1 rounded-full border transition-colors capitalize ${
+                    m.damageImmunities.includes(dt)
+                      ? 'bg-red-900/50 border-red-700 text-red-300'
+                      : 'border-stone-700 text-stone-500 hover:text-stone-300'
+                  }`}>
+                  {dt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Condition immunities */}
+          <div>
+            <p className="text-xs text-stone-500 mb-1.5">Condition Immunities</p>
+            <div className="flex flex-wrap gap-1.5">
+              {CONDITION_IMMUNITY_TYPES.map(ct => (
+                <button key={ct} onClick={() => toggleCondImmunity(ct)}
+                  className={`text-xs px-2 py-1 rounded-full border transition-colors capitalize ${
+                    m.conditionImmunities.includes(ct)
+                      ? 'bg-purple-900/50 border-purple-700 text-purple-300'
+                      : 'border-stone-700 text-stone-500 hover:text-stone-300'
+                  }`}>
+                  {ct}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Special traits */}
+          <div className="flex flex-wrap gap-4">
+            {([
+              ['legendaryActions', 'Legendary Actions'],
+              ['lairActions', 'Lair Actions'],
+              ['legendaryResistance', 'Legendary Resistance'],
+            ] as [keyof Pick<Monster, 'legendaryActions' | 'lairActions' | 'legendaryResistance'>, string][]).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={m[key]}
+                  onChange={e => updateMonster({ [key]: e.target.checked })}
+                  className="accent-amber-500 w-4 h-4" />
+                <span className="text-sm text-stone-300">{label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EncounterTab({
+  characters,
+  monsterGroups,
+  difficulty,
+  onGroupsChange,
+}: {
+  characters: Character[]
+  monsterGroups: MonsterGroup[]
+  difficulty: EncounterDifficulty | null
+  onGroupsChange: (groups: MonsterGroup[]) => void
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [showBreakdown, setShowBreakdown] = useState(false)
+
+  const activeChars = characters.filter(c => c.isActive)
+  const party = activeChars.length > 0 ? activeChars : characters
+  const totalMaxHp = party.reduce((s, c) => s + c.maxHp, 0)
+  const totalCurrentHp = party.reduce((s, c) => s + c.currentHp, 0)
+
+  function addMonster() {
+    const id = crypto.randomUUID()
+    const newGroup: MonsterGroup = { id, monster: defaultMonster(), count: 1 }
+    onGroupsChange([...monsterGroups, newGroup])
+    setExpandedId(id)
+  }
+
+  function updateGroup(id: string, updated: MonsterGroup) {
+    onGroupsChange(monsterGroups.map(g => g.id === id ? updated : g))
+  }
+
+  function removeGroup(id: string) {
+    onGroupsChange(monsterGroups.filter(g => g.id !== id))
+    if (expandedId === id) setExpandedId(null)
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Party summary */}
+      <div className="bg-stone-900 border border-stone-800 rounded-xl px-4 py-3 flex flex-wrap gap-x-6 gap-y-1">
+        <div>
+          <p className="text-xs text-stone-500">Party</p>
+          <p className="text-sm font-medium">{party.length} player{party.length !== 1 ? 's' : ''}</p>
+        </div>
+        <div>
+          <p className="text-xs text-stone-500">Avg Level</p>
+          <p className="text-sm font-medium">
+            {party.length > 0
+              ? (party.reduce((s, c) => s + c.level, 0) / party.length).toFixed(1)
+              : '—'}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-stone-500">Party HP</p>
+          <p className="text-sm font-medium">
+            {totalCurrentHp} / {totalMaxHp}
+            {totalMaxHp > 0 && (
+              <span className={`ml-1.5 text-xs ${totalCurrentHp / totalMaxHp < 0.4 ? 'text-red-400' : totalCurrentHp / totalMaxHp < 0.7 ? 'text-yellow-400' : 'text-emerald-400'}`}>
+                ({Math.round((totalCurrentHp / totalMaxHp) * 100)}%)
+              </span>
+            )}
+          </p>
+        </div>
+      </div>
+
+      {/* Monster list */}
+      <div>
+        <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Monsters</p>
+        <div className="space-y-2">
+          {monsterGroups.map(g => (
+            <MonsterGroupForm
+              key={g.id}
+              group={g}
+              expanded={expandedId === g.id}
+              onToggle={() => setExpandedId(expandedId === g.id ? null : g.id)}
+              onChange={updated => updateGroup(g.id, updated)}
+              onRemove={() => removeGroup(g.id)}
+            />
+          ))}
+        </div>
+        <button onClick={addMonster}
+          className="mt-2 w-full border border-dashed border-stone-700 rounded-xl py-3 text-sm text-stone-500 hover:text-stone-300 hover:border-stone-500 transition-colors">
+          + Add Monster
+        </button>
+      </div>
+
+      {/* Gauge */}
+      {difficulty ? (
+        <div className="bg-stone-900 border border-stone-800 rounded-xl px-4 py-4 space-y-3">
+          <div className="flex items-end justify-between">
+            <p className="text-xs text-stone-500 uppercase tracking-widest">Encounter Rating</p>
+            <p className="text-xs text-stone-500">{difficulty.breakdown.adjustedXP.toLocaleString()} adj. XP</p>
+          </div>
+
+          <GaugeBar score={difficulty.score} />
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-baseline gap-2">
+              <span className={`text-3xl font-bold tabular-nums ${difficulty.colorClass}`}>{difficulty.score.toFixed(1)}</span>
+              <span className={`text-sm font-semibold ${difficulty.colorClass}`}>{difficulty.label}</span>
+            </div>
+            <div className="text-right text-xs text-stone-500">
+              <p>Deadly threshold</p>
+              <p className="text-stone-300">{difficulty.breakdown.partyDeadlyThreshold.toLocaleString()} XP</p>
+            </div>
+          </div>
+
+          <button onClick={() => setShowBreakdown(v => !v)}
+            className="text-xs text-stone-500 hover:text-stone-300 transition-colors">
+            {showBreakdown ? '▲' : '▼'} Score breakdown
+          </button>
+
+          {showBreakdown && (
+            <div className="bg-stone-950 border border-stone-800 rounded-lg px-3 py-2.5 space-y-1.5 text-xs">
+              {([
+                ['XP-based',      difficulty.breakdown.xpScore],
+                ['AC difficulty', difficulty.breakdown.acPenalty],
+                ['Immunities',    difficulty.breakdown.immunityBonus],
+                ['Party health',  difficulty.breakdown.hpPenalty],
+                ['Special traits',difficulty.breakdown.specialBonus],
+              ] as [string, number][]).map(([label, val]) => (
+                <div key={label} className="flex items-center justify-between">
+                  <span className="text-stone-500">{label}</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-24 h-1.5 bg-stone-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-amber-600 rounded-full"
+                        style={{ width: `${Math.min(100, (val / 10) * 100)}%` }} />
+                    </div>
+                    <span className="text-stone-300 w-6 text-right">{val > 0 && label !== 'XP-based' ? '+' : ''}{val.toFixed(1)}</span>
+                  </div>
+                </div>
+              ))}
+              <div className="border-t border-stone-800 pt-1.5 flex justify-between">
+                <span className="text-stone-500">Total (clamped 1–10)</span>
+                <span className={`font-bold ${difficulty.colorClass}`}>{difficulty.score.toFixed(1)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : monsterGroups.length > 0 && characters.length === 0 ? (
+        <div className="text-center py-8 text-stone-500 text-sm">Add players to the campaign to calculate difficulty.</div>
+      ) : monsterGroups.length === 0 ? (
+        <div className="bg-stone-900 border border-dashed border-stone-700 rounded-xl px-4 py-8 text-center">
+          <p className="text-stone-500 text-sm">Add monsters above to see the encounter rating.</p>
+          <p className="text-stone-600 text-xs mt-1">Rating factors in party level, AC, immunities, and current HP.</p>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function isCustomTablesResponse(v: unknown): v is { tables: CustomTable[] } {
   return typeof v === 'object' && v !== null && 'tables' in v && Array.isArray((v as Record<string, unknown>).tables)
 }
@@ -1622,7 +2636,7 @@ function isLocationsResponse(v: unknown): v is { locations: Location[] } {
 function isSessionNotesResponse(v: unknown): v is { notes: SessionNote[] } {
   return typeof v === 'object' && v !== null && 'notes' in v && Array.isArray((v as Record<string, unknown>).notes)
 }
-function isInventoryResponse(v: unknown): v is { gold: number; sharedItems: InventoryItem[] } {
+function isInventoryResponse(v: unknown): v is { gold: number; silver?: number; copper?: number; customCurrency?: CustomCurrencyEntry[]; sharedItems: InventoryItem[] } {
   return typeof v === 'object' && v !== null && 'gold' in v && 'sharedItems' in v
 }
 function isRosterResponse(v: unknown): v is { characters: Character[] } {
@@ -1642,4 +2656,494 @@ function isStartCombatResponse(v: unknown): v is { session: CombatSession } {
 }
 function isNextTurnResponse(v: unknown): v is { session: CombatSession } {
   return typeof v === 'object' && v !== null && 'session' in v && (v as Record<string, unknown>).session !== null
+}
+function isInitiativeRequestResponse(v: unknown): v is { request: InitiativeRequest | null } {
+  return typeof v === 'object' && v !== null && 'request' in v
+}
+function isInitiativeRequestApiResponse(v: unknown): v is { request: InitiativeRequest } {
+  return typeof v === 'object' && v !== null && 'request' in v && (v as Record<string, unknown>).request !== null
+}
+function isMapsResponse(v: unknown): v is { maps: CampaignMap[]; mapAccessGranted: boolean; sharedMapIds: string[]; mapViewport: MapViewport | null } {
+  return typeof v === 'object' && v !== null && 'maps' in v && Array.isArray((v as Record<string, unknown>).maps)
+}
+
+// ── Maps Tab ──────────────────────────────────────────────────────────────────
+
+const MAP_TYPE_LABELS: Record<MapType, string> = { town: 'Town', city: 'City', world: 'World', dungeon: 'Dungeon' }
+const MAP_TYPE_COLORS: Record<MapType, string> = {
+  town: 'text-emerald-400 bg-emerald-950/50 border-emerald-900/50',
+  city: 'text-blue-400 bg-blue-950/50 border-blue-900/50',
+  world: 'text-violet-400 bg-violet-950/50 border-violet-900/50',
+  dungeon: 'text-red-400 bg-red-950/50 border-red-900/50',
+}
+
+function MapsTab({ campaignId }: { campaignId: string }) {
+  const [maps, setMaps] = useState<CampaignMap[]>([])
+  const [mapAccessGranted, setMapAccessGranted] = useState(false)
+  const [sharedMapIds, setSharedMapIds] = useState<string[]>([])
+  const [mapViewport, setMapViewport] = useState<MapViewport | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [uploadName, setUploadName] = useState('')
+  const [uploadType, setUploadType] = useState<MapType>('dungeon')
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [viewportTarget, setViewportTarget] = useState<CampaignMap | null>(null)
+
+  const loadMaps = useCallback(async () => {
+    const res = await fetch(`/api/world/maps?campaignId=${campaignId}`)
+    const data: unknown = await res.json()
+    if (isMapsResponse(data)) {
+      setMaps(data.maps)
+      setMapAccessGranted(data.mapAccessGranted)
+      setSharedMapIds(data.sharedMapIds)
+      setMapViewport(data.mapViewport)
+    }
+    setLoading(false)
+  }, [campaignId])
+
+  useEffect(() => { void loadMaps() }, [loadMaps])
+
+  async function handleUpload() {
+    if (!uploadFile || !uploadName.trim()) return
+    setUploading(true)
+    const fd = new FormData()
+    fd.append('file', uploadFile)
+    fd.append('campaignId', campaignId)
+    fd.append('name', uploadName.trim())
+    fd.append('type', uploadType)
+    await fetch('/api/world/maps', { method: 'POST', body: fd })
+    setUploadFile(null); setUploadName(''); setUploading(false)
+    void loadMaps()
+  }
+
+  async function handleDelete(map: CampaignMap) {
+    await fetch(`/api/world/maps/${map.id}?storagePath=${encodeURIComponent(map.storagePath)}`, { method: 'DELETE' })
+    const newShared = sharedMapIds.filter(id => id !== map.id)
+    const newViewport = mapViewport?.mapId === map.id ? null : mapViewport
+    await saveAccess(mapAccessGranted, newShared, newViewport)
+    void loadMaps()
+  }
+
+  async function toggleShare(mapId: string) {
+    const newShared = sharedMapIds.includes(mapId)
+      ? sharedMapIds.filter(id => id !== mapId)
+      : [...sharedMapIds, mapId]
+    await saveAccess(mapAccessGranted, newShared, mapViewport)
+    setSharedMapIds(newShared)
+  }
+
+  async function toggleAccess() {
+    const next = !mapAccessGranted
+    await saveAccess(next, sharedMapIds, mapViewport)
+    setMapAccessGranted(next)
+  }
+
+  async function saveAccess(granted: boolean, shared: string[], viewport: MapViewport | null) {
+    await fetch('/api/world/maps/access', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId, mapAccessGranted: granted, sharedMapIds: shared, mapViewport: viewport }),
+    })
+  }
+
+  async function handleViewportConfirm(viewport: MapViewport) {
+    setMapViewport(viewport)
+    await saveAccess(mapAccessGranted, sharedMapIds, viewport)
+    setViewportTarget(null)
+  }
+
+  if (loading) return <p className="text-stone-400 text-center py-8">Loading maps…</p>
+
+  return (
+    <div className="space-y-6">
+      {/* Access toggle */}
+      <div className="bg-stone-900 border border-stone-800 rounded-lg p-4 flex items-center justify-between">
+        <div>
+          <p className="font-medium text-stone-200">Party Map Access</p>
+          <p className="text-xs text-stone-500 mt-0.5">Grant players the Map tab in their panel</p>
+        </div>
+        <button
+          onClick={() => void toggleAccess()}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            mapAccessGranted
+              ? 'bg-red-900/60 border border-red-800 text-red-300 hover:bg-red-900'
+              : 'bg-amber-900/60 border border-amber-800 text-amber-300 hover:bg-amber-900'
+          }`}
+        >
+          {mapAccessGranted ? 'Revoke Access' : 'Grant Access'}
+        </button>
+      </div>
+
+      {/* Upload form */}
+      <div className="bg-stone-900 border border-stone-800 rounded-lg p-4 space-y-3">
+        <h3 className="font-medium text-stone-200">Upload Map</h3>
+        <input
+          type="text"
+          placeholder="Map name"
+          value={uploadName}
+          onChange={e => setUploadName(e.target.value)}
+          className="w-full bg-stone-800 border border-stone-700 rounded px-3 py-2 text-sm text-stone-200 placeholder-stone-500"
+        />
+        <div className="flex gap-2">
+          {(['town', 'city', 'world', 'dungeon'] as MapType[]).map(t => (
+            <button
+              key={t}
+              onClick={() => setUploadType(t)}
+              className={`flex-1 py-1.5 rounded text-xs font-medium border transition-colors ${
+                uploadType === t ? MAP_TYPE_COLORS[t] : 'border-stone-700 text-stone-500 hover:text-stone-300'
+              }`}
+            >
+              {MAP_TYPE_LABELS[t]}
+            </button>
+          ))}
+        </div>
+        <label className={`block border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
+          uploadFile ? 'border-amber-700 bg-amber-950/20' : 'border-stone-700 hover:border-stone-600'
+        }`}>
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            className="hidden"
+            onChange={e => setUploadFile(e.target.files?.[0] ?? null)}
+          />
+          <span className="text-sm text-stone-400">
+            {uploadFile ? uploadFile.name : 'Click to select image (JPEG, PNG, WebP, GIF — max 10 MB)'}
+          </span>
+        </label>
+        <button
+          onClick={() => void handleUpload()}
+          disabled={!uploadFile || !uploadName.trim() || uploading}
+          className="w-full py-2 rounded-lg bg-amber-700 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+        >
+          {uploading ? 'Uploading…' : 'Upload'}
+        </button>
+      </div>
+
+      {/* Map list */}
+      {maps.length === 0 ? (
+        <p className="text-stone-500 text-center py-4 text-sm">No maps uploaded yet.</p>
+      ) : (
+        <div className="space-y-3">
+          <h3 className="font-medium text-stone-200">Uploaded Maps</h3>
+          {maps.map(map => {
+            const isShared = sharedMapIds.includes(map.id)
+            const hasViewport = mapViewport?.mapId === map.id
+            return (
+              <div key={map.id} className="bg-stone-900 border border-stone-800 rounded-lg overflow-hidden">
+                <div className="flex gap-3 p-3">
+                  {/* Thumbnail */}
+                  <div className="w-20 h-14 rounded overflow-hidden bg-stone-800 flex-shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={map.imageUrl} alt={map.name} className="w-full h-full object-cover" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-stone-200 truncate">{map.name}</span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded border ${MAP_TYPE_COLORS[map.type]}`}>
+                        {MAP_TYPE_LABELS[map.type]}
+                      </span>
+                      {hasViewport && (
+                        <span className="text-xs px-1.5 py-0.5 rounded border text-amber-400 bg-amber-950/50 border-amber-900/50">
+                          Viewport set
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                      <button
+                        onClick={() => void toggleShare(map.id)}
+                        className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                          isShared
+                            ? 'bg-emerald-900/50 border-emerald-800 text-emerald-300 hover:bg-emerald-900'
+                            : 'border-stone-700 text-stone-500 hover:text-stone-300'
+                        }`}
+                      >
+                        {isShared ? 'Shared' : 'Share'}
+                      </button>
+                      <button
+                        onClick={() => setViewportTarget(map)}
+                        className="px-2.5 py-1 rounded text-xs font-medium border border-stone-700 text-stone-500 hover:text-stone-300 transition-colors"
+                      >
+                        {hasViewport ? 'Edit Viewport' : 'Set Viewport'}
+                      </button>
+                      {hasViewport && (
+                        <button
+                          onClick={() => void (async () => {
+                            const newVp = null
+                            setMapViewport(newVp)
+                            await saveAccess(mapAccessGranted, sharedMapIds, newVp)
+                          })()}
+                          className="px-2.5 py-1 rounded text-xs font-medium border border-stone-700 text-stone-500 hover:text-red-400 transition-colors"
+                        >
+                          Clear Viewport
+                        </button>
+                      )}
+                      <button
+                        onClick={() => void handleDelete(map)}
+                        className="px-2.5 py-1 rounded text-xs font-medium border border-stone-700 text-stone-500 hover:text-red-400 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Viewport selector modal */}
+      {viewportTarget && (
+        <ViewportSelector
+          map={viewportTarget}
+          existing={mapViewport?.mapId === viewportTarget.id ? mapViewport : null}
+          onConfirm={vp => void handleViewportConfirm(vp)}
+          onCancel={() => setViewportTarget(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Viewport Selector Modal ───────────────────────────────────────────────────
+
+type DrawMode = 'rect' | 'circle' | 'polygon'
+
+function ViewportSelector({
+  map,
+  existing,
+  onConfirm,
+  onCancel,
+}: {
+  map: CampaignMap
+  existing: MapViewport | null
+  onConfirm: (vp: MapViewport) => void
+  onCancel: () => void
+}) {
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const [drawMode, setDrawMode] = useState<DrawMode>('rect')
+  const [drawing, setDrawing] = useState(false)
+  // Pixel coordinates used during drawing
+  const [startPx, setStartPx] = useState({ x: 0, y: 0 })
+  const [currentPx, setCurrentPx] = useState({ x: 0, y: 0 })
+  const [polygonPx, setPolygonPx] = useState<{ x: number; y: number }[]>([])
+  const [containerSize, setContainerSize] = useState({ w: 1, h: 1 })
+  const [draft, setDraft] = useState<MapViewport | null>(existing)
+
+  // Track container pixel size for accurate SVG drawing
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const entry = entries[0]
+      if (entry) setContainerSize({ w: entry.contentRect.width, h: entry.contentRect.height })
+    })
+    ro.observe(el)
+    const r = el.getBoundingClientRect()
+    setContainerSize({ w: r.width || 1, h: r.height || 1 })
+    return () => ro.disconnect()
+  }, [])
+
+  function toPx(e: React.MouseEvent): { x: number; y: number } {
+    const rect = containerRef.current!.getBoundingClientRect()
+    return {
+      x: Math.max(0, Math.min(rect.width, e.clientX - rect.left)),
+      y: Math.max(0, Math.min(rect.height, e.clientY - rect.top)),
+    }
+  }
+
+  function pxToNorm(px: { x: number; y: number }) {
+    return { x: px.x / containerSize.w, y: px.y / containerSize.h }
+  }
+
+  function normToPx(n: { x: number; y: number }) {
+    return { x: n.x * containerSize.w, y: n.y * containerSize.h }
+  }
+
+  function onMouseDown(e: React.MouseEvent) {
+    e.preventDefault()
+    const pt = toPx(e)
+    if (drawMode === 'polygon') {
+      setPolygonPx(prev => [...prev, pt])
+      return
+    }
+    setDrawing(true)
+    setStartPx(pt)
+    setCurrentPx(pt)
+  }
+
+  function onMouseMove(e: React.MouseEvent) {
+    if (!drawing || drawMode === 'polygon') return
+    setCurrentPx(toPx(e))
+  }
+
+  function onMouseUp(e: React.MouseEvent) {
+    if (!drawing || drawMode === 'polygon') return
+    setDrawing(false)
+    const endPx = toPx(e)
+    if (drawMode === 'rect') {
+      const x = Math.min(startPx.x, endPx.x) / containerSize.w
+      const y = Math.min(startPx.y, endPx.y) / containerSize.h
+      const width = Math.abs(endPx.x - startPx.x) / containerSize.w
+      const height = Math.abs(endPx.y - startPx.y) / containerSize.h
+      setDraft({ mapId: map.id, shape: 'rect', x, y, width, height })
+    } else {
+      // Circle: radius in normalized coords (relative to width for visual circularity)
+      const cx = startPx.x / containerSize.w
+      const cy = startPx.y / containerSize.h
+      const rPx = Math.sqrt((endPx.x - startPx.x) ** 2 + (endPx.y - startPx.y) ** 2)
+      const r = rPx / containerSize.w
+      setDraft({ mapId: map.id, shape: 'circle', cx, cy, r })
+    }
+  }
+
+  function confirmPolygon() {
+    if (polygonPx.length < 3) return
+    const points = polygonPx.map(pxToNorm)
+    setDraft({ mapId: map.id, shape: 'polygon', points })
+    setPolygonPx([])
+  }
+
+  function resetDraw() {
+    setDraft(null); setPolygonPx([]); setDrawing(false)
+  }
+
+  // Pixel-space overlay shapes for the SVG
+  function drawingRect() {
+    const x = Math.min(startPx.x, currentPx.x), y = Math.min(startPx.y, currentPx.y)
+    const w = Math.abs(currentPx.x - startPx.x), h = Math.abs(currentPx.y - startPx.y)
+    return <rect x={x} y={y} width={w} height={h} fill="rgba(251,191,36,0.15)" stroke="#f59e0b" strokeWidth="2" />
+  }
+
+  function draftOverlay() {
+    if (!draft) return null
+    if (draft.shape === 'rect') {
+      const { x: nx, y: ny, width: nw, height: nh } = draft
+      const x = nx! * containerSize.w, y = ny! * containerSize.h
+      const w = nw! * containerSize.w, h = nh! * containerSize.h
+      return <rect x={x} y={y} width={w} height={h} fill="rgba(251,191,36,0.15)" stroke="#f59e0b" strokeWidth="2" />
+    }
+    if (draft.shape === 'circle') {
+      const cx = draft.cx! * containerSize.w
+      const cy = draft.cy! * containerSize.h
+      // r is normalized to width; rx = r*w, ry = r*w for a true circle pixel-wise
+      const rx = draft.r! * containerSize.w
+      const ry = draft.r! * containerSize.w
+      return <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="rgba(251,191,36,0.15)" stroke="#f59e0b" strokeWidth="2" />
+    }
+    if (draft.shape === 'polygon') {
+      const pts = draft.points!.map(p => normToPx(p))
+      const pointsStr = pts.map(p => `${p.x},${p.y}`).join(' ')
+      return (
+        <>
+          <polygon points={pointsStr} fill="rgba(251,191,36,0.15)" stroke="#f59e0b" strokeWidth="2" />
+          {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={5} fill="#f59e0b" />)}
+        </>
+      )
+    }
+    return null
+  }
+
+  function polygonInProgress() {
+    if (polygonPx.length === 0) return null
+    const pointsStr = polygonPx.map(p => `${p.x},${p.y}`).join(' ')
+    return (
+      <>
+        {polygonPx.length > 1 && <polyline points={pointsStr} fill="none" stroke="#f59e0b" strokeWidth="2" />}
+        {polygonPx.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={5} fill="#f59e0b" />)}
+      </>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-stone-900 border-b border-stone-700 flex-wrap gap-2">
+        <span className="font-medium text-stone-200">Set Viewport — {map.name}</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex gap-1 bg-stone-800 rounded-lg p-1">
+            {(['rect', 'circle', 'polygon'] as DrawMode[]).map(m => (
+              <button
+                key={m}
+                onClick={() => { setDrawMode(m); resetDraw() }}
+                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  drawMode === m ? 'bg-amber-700 text-white' : 'text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                {m === 'rect' ? 'Rectangle' : m === 'circle' ? 'Circle' : 'Polygon'}
+              </button>
+            ))}
+          </div>
+          <button onClick={resetDraw} className="text-xs text-stone-500 hover:text-stone-300 px-2 py-1 border border-stone-700 rounded">Reset</button>
+          <button onClick={onCancel} className="text-xs text-stone-500 hover:text-stone-300 px-2 py-1 border border-stone-700 rounded">Cancel</button>
+        </div>
+      </div>
+
+      <div className="px-4 py-1.5 bg-stone-950 border-b border-stone-800">
+        <p className="text-xs text-stone-500">
+          {drawMode === 'rect' && 'Click and drag to draw a rectangle.'}
+          {drawMode === 'circle' && 'Click the center point, then drag to set radius.'}
+          {drawMode === 'polygon' && `Click to place points (${polygonPx.length} placed). Press "Confirm Polygon" when done (min 3 points).`}
+        </p>
+      </div>
+
+      {/* Map canvas */}
+      <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-stone-950">
+        <div
+          ref={containerRef}
+          className="relative select-none inline-block"
+          style={{ cursor: 'crosshair' }}
+          onMouseDown={onMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseUp={onMouseUp}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={map.imageUrl}
+            alt={map.name}
+            style={{ display: 'block', maxWidth: '80vw', maxHeight: '65vh', userSelect: 'none' }}
+            draggable={false}
+            onLoad={e => {
+              const img = e.currentTarget
+              setContainerSize({ w: img.offsetWidth, h: img.offsetHeight })
+            }}
+          />
+          <svg
+            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}
+            width={containerSize.w}
+            height={containerSize.h}
+          >
+            {drawing && drawMode === 'rect' && drawingRect()}
+            {drawing && drawMode === 'circle' && (() => {
+              const rPx = Math.sqrt((currentPx.x - startPx.x) ** 2 + (currentPx.y - startPx.y) ** 2)
+              return <ellipse cx={startPx.x} cy={startPx.y} rx={rPx} ry={rPx} fill="rgba(251,191,36,0.15)" stroke="#f59e0b" strokeWidth="2" />
+            })()}
+            {!drawing && draftOverlay()}
+            {drawMode === 'polygon' && polygonInProgress()}
+          </svg>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between px-4 py-3 bg-stone-900 border-t border-stone-700">
+        <div>
+          {drawMode === 'polygon' && polygonPx.length >= 3 && (
+            <button
+              onClick={confirmPolygon}
+              className="px-3 py-1.5 rounded bg-stone-700 hover:bg-stone-600 text-sm text-stone-200 transition-colors"
+            >
+              Confirm Polygon ({polygonPx.length} pts)
+            </button>
+          )}
+        </div>
+        <button
+          onClick={() => draft && onConfirm(draft)}
+          disabled={!draft}
+          className="px-5 py-2 rounded-lg bg-amber-700 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+        >
+          Confirm Viewport
+        </button>
+      </div>
+    </div>
+  )
 }

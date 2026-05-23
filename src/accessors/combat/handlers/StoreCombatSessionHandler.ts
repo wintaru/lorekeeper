@@ -13,10 +13,13 @@ export class StoreCombatSessionHandler implements IHandler {
     const req = request as StoreCombatSessionRequest
     const { data, error } = await this.db
       .from('combat_sessions')
-      .insert({
+      .upsert({
         campaign_id: req.campaignId,
         initiative_order: req.initiativeOrder,
-      })
+        current_turn_index: 0,
+        round_number: 1,
+        is_active: true,
+      }, { onConflict: 'campaign_id' })
       .select()
       .single()
 

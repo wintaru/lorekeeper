@@ -1,5 +1,5 @@
 import { RequestBase } from '@/common/RequestBase'
-import type { SpellSlot, Condition, DeathSaves } from '@/types'
+import type { SpellSlot, Condition, DeathSaves, CustomCurrencyEntry } from '@/types'
 
 export class StoreCharacterRequest extends RequestBase {
   constructor(
@@ -55,5 +55,28 @@ export class UpdateXpRequest extends RequestBase {
     public readonly characterId: string,
     public readonly xp: number,
     public readonly level: number,
+  ) { super() }
+}
+
+export class KickCharacterRequest extends RequestBase {
+  constructor(public readonly characterId: string) { super() }
+}
+
+export class UpdateCharacterStatsRequest extends RequestBase {
+  constructor(
+    public readonly characterId: string,
+    public readonly maxHp: number,
+    public readonly currentHp: number,
+    public readonly armorClass: number,
+  ) { super() }
+}
+
+export class UpdateCharacterCurrencyRequest extends RequestBase {
+  constructor(
+    public readonly characterId: string,
+    public readonly gold: number,
+    public readonly silver: number,
+    public readonly copper: number,
+    public readonly customCurrency: CustomCurrencyEntry[],
   ) { super() }
 }

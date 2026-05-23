@@ -1,5 +1,5 @@
 import { ResponseBase } from '@/common/ResponseBase'
-import type { Npc, Location, SessionNote, InventoryItem, CustomTable } from '@/types'
+import type { Npc, Location, SessionNote, InventoryItem, CustomTable, CustomCurrencyEntry, CampaignMap } from '@/types'
 
 export class StoreNpcResponse extends ResponseBase {
   readonly correlationId: string
@@ -148,12 +148,26 @@ export class LoadCampaignInventoryResponse extends ResponseBase {
   readonly success: boolean
   readonly errorMessage: string | null
   readonly gold: number
+  readonly silver: number
+  readonly copper: number
+  readonly customCurrency: CustomCurrencyEntry[]
   readonly sharedItems: InventoryItem[]
 
-  constructor(correlationId: string, gold: number, sharedItems: InventoryItem[], errorMessage?: string) {
+  constructor(
+    correlationId: string,
+    gold: number,
+    silver: number,
+    copper: number,
+    customCurrency: CustomCurrencyEntry[],
+    sharedItems: InventoryItem[],
+    errorMessage?: string,
+  ) {
     super()
     this.correlationId = correlationId
     this.gold = gold
+    this.silver = silver
+    this.copper = copper
+    this.customCurrency = customCurrency
     this.sharedItems = sharedItems
     this.success = errorMessage === undefined
     this.errorMessage = errorMessage ?? null
@@ -204,6 +218,62 @@ export class LoadCustomTablesResponse extends ResponseBase {
 }
 
 export class RemoveCustomTableResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+
+  constructor(correlationId: string, success: boolean, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.success = success
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class StoreMapResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+  readonly map: CampaignMap | null
+
+  constructor(correlationId: string, map: CampaignMap | null, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.map = map
+    this.success = map !== null
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class LoadMapsResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+  readonly maps: CampaignMap[]
+
+  constructor(correlationId: string, maps: CampaignMap[], errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.maps = maps
+    this.success = errorMessage === undefined
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class RemoveMapResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+
+  constructor(correlationId: string, success: boolean, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.success = success
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class UpdateMapAccessResponse extends ResponseBase {
   readonly correlationId: string
   readonly success: boolean
   readonly errorMessage: string | null

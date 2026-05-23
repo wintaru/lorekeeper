@@ -17,8 +17,8 @@ export class GetInventoryHandler implements IHandler {
     )) as LoadCampaignInventoryResponse
 
     if (!result.success) {
-      return new GetInventoryResponse(req.correlationId, 0, [], result.errorMessage ?? 'Failed to load inventory')
+      return new GetInventoryResponse(req.correlationId, 0, 0, 0, [], [], result.errorMessage ?? 'Failed to load inventory')
     }
-    return new GetInventoryResponse(req.correlationId, result.gold, result.sharedItems)
+    return new GetInventoryResponse(req.correlationId, result.gold, result.silver, result.copper, result.customCurrency, result.sharedItems)
   }
 }

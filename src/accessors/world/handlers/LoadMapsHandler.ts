@@ -1,0 +1,26 @@
+import type { IHandler } from '@/common/resolver/IHandler'
+import type { RequestBase } from '@/common/RequestBase'
+import type { ResponseBase } from '@/common/ResponseBase'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { LoadMapsRequest } from '../WorldRequests'
+import { LoadMapsResponse } from '../WorldResponses'
+import { rowToMap } from './StoreMapHandler'
+
+export class LoadMapsHandler implements IHandler {
+  constructor(private readonly db: SupabaseClient) {}
+
+  async handle(request: RequestBase): Promise<ResponseBase> {
+    const req = request as LoadMapsRequest
+    const { data, error } = await this.db
+      .from('campaign_maps')
+      .select('*')
+      .eq('campaign_id', req.campaignId)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      return new LoadMapsResponse(req.correlationId, [], error.message)
+    }
+
+    return new LoadMapsResponse(req.correlationId, (data ?? []).map(rowToMap))
+  }
+}

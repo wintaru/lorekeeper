@@ -38,8 +38,8 @@ export class AwardXpHandler implements IHandler {
       new CalculateLevelRequest(character.xp)
     )) as CalculateLevelResponse
 
-    // Calculate new xp and new level
-    const newXp = character.xp + req.xpToAdd
+    // Calculate new xp and new level (floor at 0)
+    const newXp = Math.max(0, character.xp + req.xpToAdd)
     const newLevelResult = (await this.xpEngine.evaluate(
       new CalculateLevelRequest(newXp)
     )) as CalculateLevelResponse

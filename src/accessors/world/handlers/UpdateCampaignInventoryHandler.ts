@@ -14,6 +14,9 @@ export class UpdateCampaignInventoryHandler implements IHandler {
       .from('campaigns')
       .update({
         gold: req.gold,
+        silver: req.silver,
+        copper: req.copper,
+        custom_currency: req.customCurrency,
         shared_items: req.sharedItems,
       })
       .eq('id', req.campaignId)

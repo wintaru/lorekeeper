@@ -17,6 +17,9 @@ import { UpdateDeathSavesHandler as AccessorUpdateDeathSavesHandler } from '@/ac
 import { UpdateSpellSlotsHandler as AccessorUpdateSpellSlotsHandler } from '@/accessors/character/handlers/UpdateSpellSlotsHandler'
 import { LoadCharacterHandler } from '@/accessors/character/handlers/LoadCharacterHandler'
 import { UpdateXpHandler } from '@/accessors/character/handlers/UpdateXpHandler'
+import { KickCharacterHandler } from '@/accessors/character/handlers/KickCharacterHandler'
+import { UpdateCharacterCurrencyHandler as AccessorUpdateCharacterCurrencyHandler } from '@/accessors/character/handlers/UpdateCharacterCurrencyHandler'
+import { UpdateCharacterStatsHandler as AccessorUpdateCharacterStatsHandler } from '@/accessors/character/handlers/UpdateCharacterStatsHandler'
 import {
   StoreCharacterRequest,
   LoadRosterRequest,
@@ -26,6 +29,9 @@ import {
   UpdateSpellSlotsRequest as AccessorUpdateSpellSlotsRequest,
   LoadCharacterRequest,
   UpdateXpRequest,
+  KickCharacterRequest,
+  UpdateCharacterCurrencyRequest as AccessorUpdateCharacterCurrencyRequest,
+  UpdateCharacterStatsRequest as AccessorUpdateCharacterStatsRequest,
 } from '@/accessors/character/CharacterRequests'
 
 // Accessors — Combat
@@ -33,10 +39,18 @@ import { CombatAccessor } from '@/accessors/combat/CombatAccessor'
 import { StoreCombatSessionHandler } from '@/accessors/combat/handlers/StoreCombatSessionHandler'
 import { LoadCombatSessionHandler } from '@/accessors/combat/handlers/LoadCombatSessionHandler'
 import { UpdateCombatSessionHandler } from '@/accessors/combat/handlers/UpdateCombatSessionHandler'
+import { StoreInitiativeRequestHandler } from '@/accessors/combat/handlers/StoreInitiativeRequestHandler'
+import { UpdateInitiativeRollsHandler } from '@/accessors/combat/handlers/UpdateInitiativeRollsHandler'
+import { ResolveInitiativeRequestHandler } from '@/accessors/combat/handlers/ResolveInitiativeRequestHandler'
+import { LoadInitiativeRequestHandler } from '@/accessors/combat/handlers/LoadInitiativeRequestHandler'
 import {
   StoreCombatSessionRequest,
   LoadCombatSessionRequest,
   UpdateCombatSessionRequest,
+  StoreInitiativeRequestRequest,
+  UpdateInitiativeRollsRequest,
+  ResolveInitiativeRequestRequest,
+  LoadInitiativeRequestRequest,
 } from '@/accessors/combat/CombatRequests'
 
 // Accessors — Fate
@@ -80,6 +94,9 @@ import { UpdateDeathSavesHandler as ManagerUpdateDeathSavesHandler } from '@/man
 import { UpdateSpellSlotsHandler as ManagerUpdateSpellSlotsHandler } from '@/managers/character/handlers/UpdateSpellSlotsHandler'
 import { AwardXpHandler } from '@/managers/character/handlers/AwardXpHandler'
 import { WhisperHandler } from '@/managers/character/handlers/WhisperHandler'
+import { KickPlayerHandler } from '@/managers/character/handlers/KickPlayerHandler'
+import { UpdateCharacterCurrencyHandler } from '@/managers/character/handlers/UpdateCharacterCurrencyHandler'
+import { UpdateCharacterStatsHandler } from '@/managers/character/handlers/UpdateCharacterStatsHandler'
 import {
   UpdateHpRequest,
   UpdateConditionsRequest,
@@ -87,6 +104,9 @@ import {
   UpdateSpellSlotsRequest,
   AwardXpRequest,
   WhisperRequest,
+  KickPlayerRequest,
+  UpdateCharacterCurrencyRequest,
+  UpdateCharacterStatsRequest,
 } from '@/managers/character/CharacterRequests'
 
 // Managers — Combat
@@ -95,11 +115,19 @@ import { StartCombatHandler } from '@/managers/combat/handlers/StartCombatHandle
 import { EndCombatHandler } from '@/managers/combat/handlers/EndCombatHandler'
 import { NextTurnHandler } from '@/managers/combat/handlers/NextTurnHandler'
 import { GetCombatSessionHandler } from '@/managers/combat/handlers/GetCombatSessionHandler'
+import { RequestInitiativeHandler } from '@/managers/combat/handlers/RequestInitiativeHandler'
+import { GetInitiativeRequestHandler } from '@/managers/combat/handlers/GetInitiativeRequestHandler'
+import { SubmitInitiativeRollHandler } from '@/managers/combat/handlers/SubmitInitiativeRollHandler'
+import { ResolveInitiativeHandler } from '@/managers/combat/handlers/ResolveInitiativeHandler'
 import {
   StartCombatRequest,
   EndCombatRequest,
   NextTurnRequest,
   GetCombatSessionRequest,
+  RequestInitiativeRequest,
+  GetInitiativeRequestRequest,
+  SubmitInitiativeRollRequest,
+  ResolveInitiativeRequest,
 } from '@/managers/combat/CombatRequests'
 
 // Managers — Fate
@@ -129,6 +157,10 @@ import { StoreCustomTableHandler } from '@/accessors/world/handlers/StoreCustomT
 import { UpdateCustomTableHandler } from '@/accessors/world/handlers/UpdateCustomTableHandler'
 import { LoadCustomTablesHandler } from '@/accessors/world/handlers/LoadCustomTablesHandler'
 import { RemoveCustomTableHandler } from '@/accessors/world/handlers/RemoveCustomTableHandler'
+import { StoreMapHandler } from '@/accessors/world/handlers/StoreMapHandler'
+import { LoadMapsHandler } from '@/accessors/world/handlers/LoadMapsHandler'
+import { RemoveMapHandler } from '@/accessors/world/handlers/RemoveMapHandler'
+import { UpdateMapAccessHandler as AccessorUpdateMapAccessHandler } from '@/accessors/world/handlers/UpdateMapAccessHandler'
 import {
   StoreNpcRequest,
   UpdateNpcRequest,
@@ -148,6 +180,10 @@ import {
   UpdateCustomTableRequest,
   LoadCustomTablesRequest,
   RemoveCustomTableRequest,
+  StoreMapRequest,
+  LoadMapsRequest,
+  RemoveMapRequest,
+  UpdateMapAccessRequest as AccessorUpdateMapAccessRequest,
 } from '@/accessors/world/WorldRequests'
 
 // Managers — World
@@ -170,6 +206,10 @@ import { AddCustomTableHandler } from '@/managers/world/handlers/AddCustomTableH
 import { EditCustomTableHandler } from '@/managers/world/handlers/EditCustomTableHandler'
 import { DeleteCustomTableHandler } from '@/managers/world/handlers/DeleteCustomTableHandler'
 import { GetCustomTablesHandler } from '@/managers/world/handlers/GetCustomTablesHandler'
+import { AddMapHandler } from '@/managers/world/handlers/AddMapHandler'
+import { GetMapsHandler } from '@/managers/world/handlers/GetMapsHandler'
+import { DeleteMapHandler } from '@/managers/world/handlers/DeleteMapHandler'
+import { UpdateMapAccessHandler } from '@/managers/world/handlers/UpdateMapAccessHandler'
 import {
   AddNpcRequest,
   EditNpcRequest,
@@ -189,6 +229,10 @@ import {
   EditCustomTableRequest,
   DeleteCustomTableRequest,
   GetCustomTablesRequest,
+  AddMapRequest,
+  GetMapsRequest,
+  DeleteMapRequest,
+  UpdateMapAccessRequest,
 } from '@/managers/world/WorldRequests'
 
 import type { ICampaignManager } from '@/managers/campaign/ICampaignManager'
@@ -227,6 +271,9 @@ export function createContainer(): Container {
       .register(AccessorUpdateDeathSavesRequest, new AccessorUpdateDeathSavesHandler(db))
       .register(AccessorUpdateSpellSlotsRequest, new AccessorUpdateSpellSlotsHandler(db))
       .register(UpdateXpRequest, new UpdateXpHandler(db))
+      .register(KickCharacterRequest, new KickCharacterHandler(db))
+      .register(AccessorUpdateCharacterCurrencyRequest, new AccessorUpdateCharacterCurrencyHandler(db))
+      .register(AccessorUpdateCharacterStatsRequest, new AccessorUpdateCharacterStatsHandler(db))
       .build(),
     new HandlerResolverBuilder()
       .register(LoadRosterRequest, new LoadRosterHandler(db))
@@ -238,9 +285,13 @@ export function createContainer(): Container {
     new HandlerResolverBuilder()
       .register(StoreCombatSessionRequest, new StoreCombatSessionHandler(db))
       .register(UpdateCombatSessionRequest, new UpdateCombatSessionHandler(db))
+      .register(StoreInitiativeRequestRequest, new StoreInitiativeRequestHandler(db))
+      .register(UpdateInitiativeRollsRequest, new UpdateInitiativeRollsHandler(db))
+      .register(ResolveInitiativeRequestRequest, new ResolveInitiativeRequestHandler(db))
       .build(),
     new HandlerResolverBuilder()
       .register(LoadCombatSessionRequest, new LoadCombatSessionHandler(db))
+      .register(LoadInitiativeRequestRequest, new LoadInitiativeRequestHandler(db))
       .build(),
   )
 
@@ -303,6 +354,9 @@ export function createContainer(): Container {
       .register(UpdateSpellSlotsRequest, new ManagerUpdateSpellSlotsHandler(characterAccessor))
       .register(AwardXpRequest, new AwardXpHandler(characterAccessor, xpEngine, notificationAccessor))
       .register(WhisperRequest, new WhisperHandler(characterAccessor, notificationAccessor))
+      .register(KickPlayerRequest, new KickPlayerHandler(characterAccessor))
+      .register(UpdateCharacterCurrencyRequest, new UpdateCharacterCurrencyHandler(characterAccessor))
+      .register(UpdateCharacterStatsRequest, new UpdateCharacterStatsHandler(characterAccessor))
       .build(),
   )
 
@@ -311,9 +365,13 @@ export function createContainer(): Container {
       .register(StartCombatRequest, new StartCombatHandler(combatAccessor))
       .register(EndCombatRequest, new EndCombatHandler(combatAccessor))
       .register(NextTurnRequest, new NextTurnHandler(combatAccessor))
+      .register(RequestInitiativeRequest, new RequestInitiativeHandler(combatAccessor))
+      .register(SubmitInitiativeRollRequest, new SubmitInitiativeRollHandler(combatAccessor))
+      .register(ResolveInitiativeRequest, new ResolveInitiativeHandler(combatAccessor))
       .build(),
     new HandlerResolverBuilder()
       .register(GetCombatSessionRequest, new GetCombatSessionHandler(combatAccessor))
+      .register(GetInitiativeRequestRequest, new GetInitiativeRequestHandler(combatAccessor))
       .build(),
   )
 
@@ -339,6 +397,8 @@ export function createContainer(): Container {
       .register(AccessorUpdateCharacterLootRequest, new AccessorUpdateCharacterLootHandler(db))
       .register(StoreCustomTableRequest, new StoreCustomTableHandler(db))
       .register(UpdateCustomTableRequest, new UpdateCustomTableHandler(db))
+      .register(StoreMapRequest, new StoreMapHandler(db))
+      .register(AccessorUpdateMapAccessRequest, new AccessorUpdateMapAccessHandler(db))
       .build(),
     new HandlerResolverBuilder()
       .register(LoadNpcsRequest, new LoadNpcsHandler(db))
@@ -346,12 +406,14 @@ export function createContainer(): Container {
       .register(LoadSessionNotesRequest, new LoadSessionNotesHandler(db))
       .register(LoadCampaignInventoryRequest, new LoadCampaignInventoryHandler(db))
       .register(LoadCustomTablesRequest, new LoadCustomTablesHandler(db))
+      .register(LoadMapsRequest, new LoadMapsHandler(db))
       .build(),
     new HandlerResolverBuilder()
       .register(RemoveNpcRequest, new RemoveNpcHandler(db))
       .register(RemoveLocationRequest, new RemoveLocationHandler(db))
       .register(RemoveSessionNoteRequest, new RemoveSessionNoteHandler(db))
       .register(RemoveCustomTableRequest, new RemoveCustomTableHandler(db))
+      .register(RemoveMapRequest, new RemoveMapHandler(db))
       .build(),
   )
 
@@ -370,6 +432,9 @@ export function createContainer(): Container {
       .register(AddCustomTableRequest, new AddCustomTableHandler(worldAccessor))
       .register(EditCustomTableRequest, new EditCustomTableHandler(worldAccessor))
       .register(DeleteCustomTableRequest, new DeleteCustomTableHandler(worldAccessor))
+      .register(AddMapRequest, new AddMapHandler(worldAccessor))
+      .register(DeleteMapRequest, new DeleteMapHandler(worldAccessor))
+      .register(UpdateMapAccessRequest, new UpdateMapAccessHandler(worldAccessor))
       .build(),
     new HandlerResolverBuilder()
       .register(GetNpcsRequest, new GetNpcsHandler(worldAccessor))
@@ -377,6 +442,7 @@ export function createContainer(): Container {
       .register(GetSessionNotesRequest, new GetSessionNotesHandler(worldAccessor))
       .register(GetInventoryRequest, new GetInventoryHandler(worldAccessor))
       .register(GetCustomTablesRequest, new GetCustomTablesHandler(worldAccessor))
+      .register(GetMapsRequest, new GetMapsHandler(worldAccessor))
       .build(),
   )
 

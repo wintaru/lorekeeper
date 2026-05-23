@@ -3,7 +3,10 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import type { Character, FateEvent, FateEventType, Whisper } from '@/types'
+import type { Character, CustomCurrencyEntry, FateEvent, FateEventType, Whisper, CampaignMap, MapViewport, InitiativeRequest } from '@/types'
+import { SpellsTab } from '@/components/SpellsTab'
+import { RulebookTab } from '@/components/RulebookTab'
+import { LevelUpModal } from '@/components/LevelUpModal'
 
 const XP_THRESHOLDS = [0,300,900,2700,6500,14000,23000,34000,48000,64000,85000,100000,120000,140000,165000,195000,225000,265000,305000,355000]
 function xpForNextLevel(level: number) { return level >= 20 ? null : XP_THRESHOLDS[level] }
@@ -36,6 +39,24 @@ const EVENT_LABELS: Record<FateEventType, string> = {
   mystery:  'Mystery',
 }
 
+const CONDITION_ICONS: Record<string, string> = {
+  blinded:       '👁️',
+  charmed:       '💗',
+  deafened:      '🔇',
+  exhaustion:    '💤',
+  frightened:    '😨',
+  grappled:      '🤼',
+  incapacitated: '😵',
+  invisible:     '👻',
+  paralyzed:     '⚡',
+  petrified:     '🪨',
+  poisoned:      '🤢',
+  prone:         '↙️',
+  restrained:    '⛓️',
+  stunned:       '💫',
+  unconscious:   '😴',
+}
+
 const EVENT_TOAST: Record<FateEventType, { message: string; classes: string }> = {
   attack:   { message: 'An attack is coming for you…',    classes: 'bg-red-950 border-red-500 text-red-200' },
   curse:    { message: 'A dark power takes hold…',         classes: 'bg-purple-950 border-purple-500 text-purple-200' },
@@ -58,6 +79,17 @@ export default function PlayerCampaignPage() {
   const whisperToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [rollHistory, setRollHistory] = useState<RollEntry[]>([])
   const [rollExpr, setRollExpr] = useState('')
+  const [initiativeRequest, setInitiativeRequest] = useState<InitiativeRequest | null>(null)
+  const [initiativeRollInput, setInitiativeRollInput] = useState('')
+  const [initiativeSubmitting, setInitiativeSubmitting] = useState(false)
+  const [levelUpModal, setLevelUpModal] = useState<{ level: number; prevLevel: number } | null>(null)
+  const prevLevelRef = useRef<number | null>(null)
+  const [playerTab, setPlayerTab] = useState<'character' | 'map' | 'spells' | 'rulebook'>('character')
+  const [mapAccessGranted, setMapAccessGranted] = useState(false)
+  const [sharedMapIds, setSharedMapIds] = useState<string[]>([])
+  const [mapViewport, setMapViewport] = useState<MapViewport | null>(null)
+  const [campaignMaps, setCampaignMaps] = useState<CampaignMap[]>([])
+  const [selectedMapId, setSelectedMapId] = useState<string | null>(null)
 
   const loadCharacter = useCallback(async (cid: string) => {
     const characterId = sessionStorage.getItem(`character_${code.toUpperCase()}`)
@@ -84,6 +116,23 @@ export default function PlayerCampaignPage() {
     if (isWhispersResponse(data)) setWhispers(data.whispers)
   }, [])
 
+  const loadMapAccess = useCallback(async (cid: string) => {
+    const res = await fetch(`/api/world/maps?campaignId=${cid}`)
+    const data: unknown = await res.json()
+    if (isMapsResponse(data)) {
+      setMapAccessGranted(data.mapAccessGranted)
+      setSharedMapIds(data.sharedMapIds)
+      setMapViewport(data.mapViewport)
+      setCampaignMaps(data.maps)
+    }
+  }, [])
+
+  const fetchInitiativeRequest = useCallback(async (cid: string) => {
+    const res = await fetch(`/api/initiative/request?campaignId=${cid}`)
+    const data: unknown = await res.json()
+    if (isInitiativeRequestResponse(data)) setInitiativeRequest(data.request)
+  }, [])
+
   useEffect(() => {
     async function init() {
       const supabase = createClient()
@@ -91,11 +140,11 @@ export default function PlayerCampaignPage() {
       if (!data) { setLoading(false); return }
       const cid = data.id as string
       setCampaignId(cid)
-      await loadCharacter(cid)
+      await Promise.all([loadCharacter(cid), loadMapAccess(cid), fetchInitiativeRequest(cid)])
       setLoading(false)
     }
     void init()
-  }, [code, loadCharacter])
+  }, [code, loadCharacter, loadMapAccess, fetchInitiativeRequest])
 
   // Load fate log and whispers once character is known
   useEffect(() => {
@@ -104,7 +153,16 @@ export default function PlayerCampaignPage() {
     void loadWhispers(character.id)
   }, [character?.id, campaignId, loadFateLog, loadWhispers])
 
-  // Realtime: HP updates, fate draws (toast), fate reveals (log refresh), whispers (toast + log)
+  // Detect level-up after a character update — show the level-up modal
+  useEffect(() => {
+    if (!character) { prevLevelRef.current = null; return }
+    if (prevLevelRef.current !== null && character.level > prevLevelRef.current) {
+      setLevelUpModal({ level: character.level, prevLevel: prevLevelRef.current })
+    }
+    prevLevelRef.current = character.level
+  }, [character?.level])
+
+  // Realtime: HP updates, fate draws (toast), fate reveals (log refresh), whispers (toast + log), map access
   useEffect(() => {
     if (!character || !campaignId) return
     const supabase = createClient()
@@ -112,7 +170,7 @@ export default function PlayerCampaignPage() {
       .channel(`player:${character.id}`)
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'characters', filter: `id=eq.${character.id}` },
-        payload => { if (payload.new) setCharacter(rowToCharacter(payload.new as Record<string, unknown>)) })
+        () => { void loadCharacter(campaignId) })
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'fate_events', filter: `target_character_id=eq.${character.id}` },
         payload => {
@@ -139,13 +197,54 @@ export default function PlayerCampaignPage() {
           setWhisperToast(whisper.message)
           whisperToastTimerRef.current = setTimeout(() => setWhisperToast(null), 8000)
         })
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'campaigns', filter: `id=eq.${campaignId}` },
+        payload => {
+          const row = payload.new as Record<string, unknown>
+          const granted = row.map_access_granted as boolean
+          setMapAccessGranted(granted)
+          setSharedMapIds((row.shared_map_ids as string[]) ?? [])
+          setMapViewport((row.map_viewport as MapViewport | null) ?? null)
+          if (!granted) setPlayerTab('character')
+          // Re-fetch full maps list in case new maps were uploaded since page load
+          void loadMapAccess(campaignId)
+        })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'initiative_requests', filter: `campaign_id=eq.${campaignId}` },
+        payload => {
+          const row = payload.new as Record<string, unknown>
+          setInitiativeRequest({
+            id: row.id as string,
+            campaignId: row.campaign_id as string,
+            status: row.status as 'pending' | 'resolved',
+            rolls: (row.rolls as Record<string, number>) ?? {},
+            createdAt: new Date(row.created_at as string),
+          })
+          setInitiativeRollInput('')
+        })
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'initiative_requests', filter: `campaign_id=eq.${campaignId}` },
+        payload => {
+          const row = payload.new as Record<string, unknown>
+          if (row.status === 'resolved') {
+            setInitiativeRequest(null)
+          } else {
+            setInitiativeRequest({
+              id: row.id as string,
+              campaignId: row.campaign_id as string,
+              status: row.status as 'pending' | 'resolved',
+              rolls: (row.rolls as Record<string, number>) ?? {},
+              createdAt: new Date(row.created_at as string),
+            })
+          }
+        })
       .subscribe()
     return () => {
       void supabase.removeChannel(channel)
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       if (whisperToastTimerRef.current) clearTimeout(whisperToastTimerRef.current)
     }
-  }, [character?.id, campaignId, loadFateLog])
+  }, [character?.id, campaignId, loadFateLog, loadCharacter, loadMapAccess])
 
   // Register service worker and subscribe to push.
   // Always run on character load so this browser's subscription is synced to the DB —
@@ -182,7 +281,7 @@ export default function PlayerCampaignPage() {
   const hpColor = hpPercent > 50 ? 'bg-emerald-500' : hpPercent > 25 ? 'bg-yellow-500' : 'bg-red-500'
 
   return (
-    <main className="min-h-screen bg-stone-950 text-stone-100 p-4">
+    <main className={`bg-stone-950 text-stone-100 flex flex-col ${playerTab === 'map' ? 'h-screen overflow-hidden' : 'min-h-screen'}`}>
       {fateToast && (
         <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-sm border-2 rounded-2xl px-5 py-4 shadow-2xl animate-in slide-in-from-top-4 fade-in duration-300 ${EVENT_TOAST[fateToast].classes}`}>
           <p className="text-xs uppercase tracking-[0.2em] opacity-60 mb-1">The fates have spoken</p>
@@ -198,12 +297,170 @@ export default function PlayerCampaignPage() {
           <button onClick={() => setWhisperToast(null)} className="absolute top-3 right-4 text-stone-600 hover:text-stone-400 text-sm transition-opacity">✕</button>
         </div>
       )}
-      <div className="max-w-sm mx-auto space-y-6">
-        <div>
+      {/* Initiative roll modal */}
+      {initiativeRequest?.status === 'pending' && character && (() => {
+        const myRoll = initiativeRequest.rolls[character.id]
+        // Show the submitted state only when we have a roll AND the user isn't editing
+        const showSubmitted = myRoll !== undefined && initiativeRollInput === ''
+
+        async function handleSubmitInitiative() {
+          if (!character || !campaignId || initiativeSubmitting) return
+          const roll = parseInt(initiativeRollInput, 10)
+          if (isNaN(roll) || roll < 1 || roll > 30) return
+          setInitiativeSubmitting(true)
+          try {
+            await fetch('/api/initiative/submit', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ campaignId, characterId: character.id, roll }),
+            })
+            setInitiativeRequest(prev => prev ? { ...prev, rolls: { ...prev.rolls, [character.id]: roll } } : prev)
+            setInitiativeRollInput('')
+          } finally {
+            setInitiativeSubmitting(false)
+          }
+        }
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+            <div className="bg-stone-900 border-2 border-amber-700/60 rounded-2xl p-6 w-full max-w-sm space-y-5 shadow-2xl">
+              {showSubmitted ? (
+                <>
+                  <div className="text-center space-y-2">
+                    <p className="text-emerald-400 text-4xl">✓</p>
+                    <p className="text-xl font-bold">Roll Submitted!</p>
+                    <p className="text-stone-400 text-sm">You rolled <span className="text-amber-300 font-bold font-mono text-lg">{myRoll}</span></p>
+                    <p className="text-stone-500 text-xs">Waiting for the DM to start combat…</p>
+                  </div>
+                  <button
+                    onClick={() => setInitiativeRollInput(String(myRoll))}
+                    className="w-full text-xs text-stone-500 hover:text-stone-300 transition-colors py-2"
+                  >
+                    Change roll
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <p className="text-xs text-amber-400 uppercase tracking-widest mb-1">Combat is starting!</p>
+                    <p className="text-xl font-bold">Roll Initiative</p>
+                    <p className="text-stone-400 text-sm mt-1">Roll a d20 and add any modifiers, then submit your total.</p>
+                  </div>
+                  <button
+                    onClick={() => setInitiativeRollInput(String(Math.floor(Math.random() * 20) + 1))}
+                    className="w-full bg-amber-700 hover:bg-amber-600 text-white font-bold py-3 rounded-xl transition-colors text-lg"
+                  >
+                    🎲 Roll d20
+                  </button>
+                  <div className="space-y-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      placeholder="Enter your total…"
+                      value={initiativeRollInput}
+                      onChange={e => setInitiativeRollInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') void handleSubmitInitiative() }}
+                      className="w-full bg-stone-800 border border-stone-700 rounded-xl px-4 py-3 text-center text-2xl font-bold font-mono focus:outline-none focus:border-amber-500"
+                    />
+                    <button
+                      onClick={() => void handleSubmitInitiative()}
+                      disabled={!initiativeRollInput.trim() || initiativeSubmitting}
+                      className="w-full bg-red-700 hover:bg-red-600 disabled:opacity-40 text-white font-bold py-3 rounded-xl transition-colors"
+                    >
+                      {initiativeSubmitting ? 'Submitting…' : myRoll !== undefined ? 'Resubmit Roll' : 'Submit Roll'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
+      {levelUpModal !== null && (
+        <LevelUpModal
+          characterName={character.characterName}
+          className={character.class}
+          newLevel={levelUpModal.level}
+          currentSpellSlots={character.spellSlots}
+          onClose={() => setLevelUpModal(null)}
+          onApplySpellSlots={async (slots) => {
+            await fetch('/api/characters/spell-slots', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ characterId: character.id, spellSlots: slots }),
+            })
+            setCharacter(prev => prev ? { ...prev, spellSlots: slots } : prev)
+          }}
+          onBrowseSpells={() => {
+            setPlayerTab('spells')
+            setLevelUpModal(null)
+          }}
+        />
+      )}
+
+      {/* Header */}
+      <div className="shrink-0 border-b border-stone-800 px-4 pt-4 pb-0">
+        <div className="max-w-sm mx-auto">
           <h1 className="text-2xl font-bold">{character.characterName}</h1>
           <p className="text-stone-400">{character.playerName} · {character.class} {character.level}</p>
           <p className="font-mono text-stone-500 text-xs mt-0.5">{code.toUpperCase()}</p>
+          {/* Tab bar */}
+          <div className="flex mt-3">
+            <button
+              onClick={() => setPlayerTab('character')}
+              className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${playerTab === 'character' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}
+            >Character</button>
+            {mapAccessGranted && (
+              <button
+                onClick={() => setPlayerTab('map')}
+                className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${playerTab === 'map' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}
+              >Map</button>
+            )}
+            <button
+              onClick={() => setPlayerTab('spells')}
+              className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${playerTab === 'spells' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}
+            >Spells</button>
+            <button
+              onClick={() => setPlayerTab('rulebook')}
+              className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${playerTab === 'rulebook' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}
+            >Rulebook</button>
+          </div>
         </div>
+      </div>
+
+      {playerTab === 'map' && mapAccessGranted && (
+        <div className="flex-1 overflow-hidden">
+          <PlayerMapTab
+            maps={campaignMaps}
+            sharedMapIds={sharedMapIds}
+            mapViewport={mapViewport}
+            selectedMapId={selectedMapId}
+            onSelectMap={setSelectedMapId}
+          />
+        </div>
+      )}
+
+      {playerTab === 'spells' && (
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-sm mx-auto p-4">
+            <SpellsTab defaultClass={character.class} />
+          </div>
+        </div>
+      )}
+
+      {playerTab === 'rulebook' && (
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-sm mx-auto p-4">
+            <RulebookTab />
+          </div>
+        </div>
+      )}
+
+      {playerTab === 'character' && (
+      <div className="flex-1 overflow-y-auto">
+      <div className="max-w-sm mx-auto p-4 space-y-6">
 
         {/* Push notification status */}
         {pushStatus === 'denied' && (
@@ -266,15 +523,50 @@ export default function PlayerCampaignPage() {
           )
         })()}
 
+        {/* Wallet */}
+        {(character.gold > 0 || character.silver > 0 || character.copper > 0 || character.customCurrency.length > 0) && (
+          <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-2">
+            <p className="text-xs text-stone-500 uppercase tracking-widest mb-3">Wallet</p>
+            {character.gold > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-amber-400 text-sm font-medium">Gold</span>
+                <span className="text-stone-100 tabular-nums font-semibold">{character.gold.toLocaleString()} gp</span>
+              </div>
+            )}
+            {character.silver > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 text-sm font-medium">Silver</span>
+                <span className="text-stone-100 tabular-nums font-semibold">{character.silver.toLocaleString()} sp</span>
+              </div>
+            )}
+            {character.copper > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-orange-400 text-sm font-medium">Copper</span>
+                <span className="text-stone-100 tabular-nums font-semibold">{character.copper.toLocaleString()} cp</span>
+              </div>
+            )}
+            {character.customCurrency.map(cc => (
+              <div key={cc.name} className="flex items-center justify-between">
+                <span className="text-stone-300 text-sm">{cc.name}</span>
+                <span className="text-stone-100 tabular-nums font-semibold">{cc.amount.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {character.conditions.length > 0 && (
           <div className="bg-stone-900 border border-amber-900/50 rounded-xl p-3">
             <p className="text-stone-400 text-xs mb-2">Conditions</p>
             <div className="flex flex-wrap gap-2">
-              {character.conditions.map(c => (
-                <span key={c.name} className="text-xs bg-amber-900/40 text-amber-300 px-2 py-0.5 rounded-full">
-                  {c.name}{c.roundsRemaining !== null ? ` (${c.roundsRemaining}r)` : ''}
-                </span>
-              ))}
+              {character.conditions.map(c => {
+                const icon = CONDITION_ICONS[c.name.toLowerCase()]
+                return (
+                  <span key={c.name} className="flex items-center gap-1.5 text-xs bg-amber-900/40 text-amber-300 px-2 py-1 rounded-full">
+                    {icon && <span className="text-base leading-none">{icon}</span>}
+                    {c.name}{c.roundsRemaining !== null ? ` (${c.roundsRemaining}r)` : ''}
+                  </span>
+                )
+              })}
             </div>
           </div>
         )}
@@ -309,30 +601,48 @@ export default function PlayerCampaignPage() {
         )}
 
         {/* Spell slots */}
-        {character.spellSlots.length > 0 && (
-          <div className="bg-stone-900 border border-stone-800 rounded-xl p-4">
-            <p className="text-xs text-stone-500 uppercase tracking-widest mb-3">Spell Slots</p>
-            <div className="space-y-2">
-              {character.spellSlots.map(slot => (
-                <div key={slot.level} className="flex items-center gap-3">
-                  <span className="text-stone-500 text-xs w-12 shrink-0">Level {slot.level}</span>
-                  <div className="flex gap-1.5">
-                    {Array.from({ length: slot.total }).map((_, i) => {
-                      const isUsed = i < slot.used
-                      return (
-                        <button key={i}
-                          onClick={() => void toggleSpellSlot(character.id, slot.level, i, character.spellSlots, setCharacter)}
-                          className={`w-6 h-6 rounded-full border-2 transition-colors ${isUsed ? 'border-stone-600 bg-stone-800' : 'border-violet-500 bg-violet-900/50'}`}
-                        />
-                      )
-                    })}
-                  </div>
-                  <span className="text-xs text-stone-500 tabular-nums">{slot.total - slot.used}/{slot.total}</span>
+        <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-3">
+          <p className="text-xs text-stone-500 uppercase tracking-widest">Spell Slots</p>
+          {character.spellSlots.length === 0 && (
+            <p className="text-stone-600 text-xs">No spell slots yet — add a level below.</p>
+          )}
+          <div className="space-y-2">
+            {character.spellSlots.map(slot => (
+              <div key={slot.level} className="flex items-center gap-2">
+                <span className="text-stone-500 text-xs w-10 shrink-0">Lvl {slot.level}</span>
+                <div className="flex gap-1 flex-wrap flex-1">
+                  {Array.from({ length: slot.total }).map((_, i) => {
+                    const isUsed = i < slot.used
+                    return (
+                      <button key={i}
+                        onClick={() => void toggleSpellSlot(character.id, slot.level, i, character.spellSlots, setCharacter)}
+                        className={`w-6 h-6 rounded-full border-2 transition-colors ${isUsed ? 'border-stone-600 bg-stone-800' : 'border-violet-500 bg-violet-900/50'}`}
+                      />
+                    )
+                  })}
                 </div>
-              ))}
-            </div>
+                <span className="text-xs text-stone-500 tabular-nums w-8 text-right shrink-0">{slot.total - slot.used}/{slot.total}</span>
+                <button
+                  onClick={() => void adjustSlotTotal(character.id, slot.level, -1, character.spellSlots, setCharacter)}
+                  className="w-6 h-6 flex items-center justify-center text-stone-600 hover:text-stone-300 text-base leading-none shrink-0"
+                >−</button>
+                <button
+                  onClick={() => void adjustSlotTotal(character.id, slot.level, +1, character.spellSlots, setCharacter)}
+                  className="w-6 h-6 flex items-center justify-center text-stone-600 hover:text-stone-300 text-base leading-none shrink-0"
+                >+</button>
+                <button
+                  onClick={() => void removeSlotLevel(character.id, slot.level, character.spellSlots, setCharacter)}
+                  className="w-6 h-6 flex items-center justify-center text-stone-700 hover:text-red-400 text-xs transition-colors shrink-0"
+                >✕</button>
+              </div>
+            ))}
           </div>
-        )}
+          <AddSlotLevelRow
+            characterId={character.id}
+            spellSlots={character.spellSlots}
+            setCharacter={setCharacter}
+          />
+        </div>
 
         {(whispers.length > 0 || fateLog.length > 0) && (() => {
           type LogEntry =
@@ -427,6 +737,8 @@ export default function PlayerCampaignPage() {
           )}
         </div>
       </div>
+      </div>
+      )}
     </main>
   )
 }
@@ -467,6 +779,101 @@ async function toggleSpellSlot(
     body: JSON.stringify({ characterId, spellSlots }),
   })
   setCharacter(prev => prev ? { ...prev, spellSlots } : prev)
+}
+
+async function adjustSlotTotal(
+  characterId: string,
+  level: number,
+  delta: number,
+  currentSlots: Character['spellSlots'],
+  setCharacter: React.Dispatch<React.SetStateAction<Character | null>>,
+) {
+  const spellSlots = currentSlots.map(s => {
+    if (s.level !== level) return s
+    const newTotal = Math.max(1, Math.min(9, s.total + delta))
+    return { ...s, total: newTotal, used: Math.min(s.used, newTotal) }
+  })
+  await fetch('/api/characters/spell-slots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ characterId, spellSlots }),
+  })
+  setCharacter(prev => prev ? { ...prev, spellSlots } : prev)
+}
+
+async function removeSlotLevel(
+  characterId: string,
+  level: number,
+  currentSlots: Character['spellSlots'],
+  setCharacter: React.Dispatch<React.SetStateAction<Character | null>>,
+) {
+  const spellSlots = currentSlots.filter(s => s.level !== level)
+  await fetch('/api/characters/spell-slots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ characterId, spellSlots }),
+  })
+  setCharacter(prev => prev ? { ...prev, spellSlots } : prev)
+}
+
+function AddSlotLevelRow({
+  characterId,
+  spellSlots,
+  setCharacter,
+}: {
+  characterId: string
+  spellSlots: Character['spellSlots']
+  setCharacter: React.Dispatch<React.SetStateAction<Character | null>>
+}) {
+  const [newLevel, setNewLevel] = React.useState(1)
+  const [newTotal, setNewTotal] = React.useState(2)
+
+  const existingLevels = spellSlots.map(s => s.level)
+  const available = [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(l => !existingLevels.includes(l))
+  if (available.length === 0) return null
+
+  const effectiveLevel = available.includes(newLevel) ? newLevel : available[0]!
+
+  const handleAdd = async () => {
+    const updated = [...spellSlots, { level: effectiveLevel, total: newTotal, used: 0 }]
+      .sort((a, b) => a.level - b.level)
+    await fetch('/api/characters/spell-slots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId, spellSlots: updated }),
+    })
+    setCharacter(prev => prev ? { ...prev, spellSlots: updated } : prev)
+  }
+
+  return (
+    <div className="flex items-center gap-2 pt-2 border-t border-stone-800">
+      <span className="text-xs text-stone-600 shrink-0">Add</span>
+      <select
+        value={effectiveLevel}
+        onChange={e => setNewLevel(Number(e.target.value))}
+        className="bg-stone-800 border border-stone-700 rounded px-2 py-1 text-xs text-stone-300 focus:outline-none focus:border-violet-600"
+      >
+        {available.map(l => (
+          <option key={l} value={l}>Level {l}</option>
+        ))}
+      </select>
+      <input
+        type="number"
+        min={1}
+        max={9}
+        value={newTotal}
+        onChange={e => setNewTotal(Math.max(1, Math.min(9, Number(e.target.value))))}
+        className="w-12 bg-stone-800 border border-stone-700 rounded px-2 py-1 text-xs text-stone-300 text-center focus:outline-none focus:border-violet-600"
+      />
+      <span className="text-xs text-stone-600 shrink-0">slots</span>
+      <button
+        onClick={() => void handleAdd()}
+        className="ml-auto px-3 py-1 bg-violet-900/60 hover:bg-violet-800/60 border border-violet-700/50 rounded text-xs text-violet-300 transition-colors"
+      >
+        + Add
+      </button>
+    </div>
+  )
 }
 
 async function subscribeToPush(
@@ -530,6 +937,194 @@ function isWhispersResponse(v: unknown): v is { whispers: Whisper[] } {
   return typeof v === 'object' && v !== null && 'whispers' in v && Array.isArray((v as Record<string, unknown>).whispers)
 }
 
+function isMapsResponse(v: unknown): v is { maps: CampaignMap[]; mapAccessGranted: boolean; sharedMapIds: string[]; mapViewport: MapViewport | null } {
+  return typeof v === 'object' && v !== null && 'maps' in v && Array.isArray((v as Record<string, unknown>).maps)
+}
+
+function isInitiativeRequestResponse(v: unknown): v is { request: InitiativeRequest | null } {
+  return typeof v === 'object' && v !== null && 'request' in v
+}
+
+// ── Player Map Tab ─────────────────────────────────────────────────────────────
+
+function PlayerMapTab({
+  maps,
+  sharedMapIds,
+  mapViewport,
+  selectedMapId,
+  onSelectMap,
+}: {
+  maps: CampaignMap[]
+  sharedMapIds: string[]
+  mapViewport: MapViewport | null
+  selectedMapId: string | null
+  onSelectMap: (id: string) => void
+}) {
+  const sharedMaps = maps.filter(m => sharedMapIds.includes(m.id))
+
+  const activeId = selectedMapId && sharedMapIds.includes(selectedMapId)
+    ? selectedMapId
+    : sharedMaps[0]?.id ?? null
+
+  const activeMap = sharedMaps.find(m => m.id === activeId) ?? null
+  const activeViewport = activeMap && mapViewport?.mapId === activeMap.id ? mapViewport : null
+
+  if (sharedMaps.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-stone-500 text-sm">
+        No maps shared yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Map selector (only show if more than 1 shared map) */}
+      {sharedMaps.length > 1 && (
+        <div className="flex gap-2 px-4 py-2 border-b border-stone-800 overflow-x-auto">
+          {sharedMaps.map(m => (
+            <button
+              key={m.id}
+              onClick={() => onSelectMap(m.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap border transition-colors ${
+                m.id === activeId
+                  ? 'bg-amber-900/60 border-amber-700 text-amber-300'
+                  : 'border-stone-700 text-stone-500 hover:text-stone-300'
+              }`}
+            >
+              {m.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Map viewer */}
+      <div className="flex-1 overflow-hidden">
+        {activeMap && <MapViewer map={activeMap} viewport={activeViewport} />}
+      </div>
+    </div>
+  )
+}
+
+function MapViewer({ map, viewport }: { map: CampaignMap; viewport: MapViewport | null }) {
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const [containerSize, setContainerSize] = useState({ w: 0, h: 0 })
+  const [imgNatural, setImgNatural] = useState({ w: 1, h: 1 })
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const entry = entries[0]
+      if (entry) setContainerSize({ w: entry.contentRect.width, h: entry.contentRect.height })
+    })
+    ro.observe(el)
+    const r = el.getBoundingClientRect()
+    setContainerSize({ w: r.width, h: r.height })
+    return () => ro.disconnect()
+  }, [])
+
+  if (!viewport) {
+    return (
+      <div ref={containerRef} className="w-full h-full overflow-hidden bg-stone-950">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={map.imageUrl}
+          alt={map.name}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top left' }}
+          onLoad={e => {
+            const img = e.currentTarget
+            setImgNatural({ w: img.naturalWidth, h: img.naturalHeight })
+          }}
+        />
+      </div>
+    )
+  }
+
+  // Bounding box of the selected region in normalized coords
+  let xMin = 0, xMax = 1, yMin = 0, yMax = 1
+  if (viewport.shape === 'rect') {
+    xMin = viewport.x!; yMin = viewport.y!
+    xMax = xMin + viewport.width!; yMax = yMin + viewport.height!
+  } else if (viewport.shape === 'circle') {
+    // r is normalized to image width; convert ry for aspect ratio
+    const rX = viewport.r!
+    const rY = imgNatural.h > 0 ? viewport.r! * (imgNatural.w / imgNatural.h) : viewport.r!
+    xMin = viewport.cx! - rX; xMax = viewport.cx! + rX
+    yMin = viewport.cy! - rY; yMax = viewport.cy! + rY
+  } else if (viewport.shape === 'polygon' && viewport.points && viewport.points.length > 0) {
+    const xs = viewport.points.map(p => p.x)
+    const ys = viewport.points.map(p => p.y)
+    xMin = Math.min(...xs); xMax = Math.max(...xs)
+    yMin = Math.min(...ys); yMax = Math.max(...ys)
+  }
+
+  xMin = Math.max(0, xMin); yMin = Math.max(0, yMin)
+  xMax = Math.min(1, xMax); yMax = Math.min(1, yMax)
+
+  const bboxW = Math.max(0.01, xMax - xMin)
+  const bboxH = Math.max(0.01, yMax - yMin)
+  const cW = containerSize.w || 1
+  const cH = containerSize.h || 1
+
+  // Scale image so bbox fills container
+  const scaleX = cW / (bboxW * imgNatural.w)
+  const scaleY = cH / (bboxH * imgNatural.h)
+  const scale = Math.min(scaleX, scaleY)
+
+  const scaledW = imgNatural.w * scale
+  const scaledH = imgNatural.h * scale
+
+  // Center the bbox in the container
+  const imgLeft = -xMin * scaledW + (cW - bboxW * scaledW) / 2
+  const imgTop = -yMin * scaledH + (cH - bboxH * scaledH) / 2
+
+  // Clip path in container-relative pixel coords
+  let clipPath = ''
+  if (viewport.shape === 'rect') {
+    const top = Math.max(0, yMin * scaledH + imgTop)
+    const left = Math.max(0, xMin * scaledW + imgLeft)
+    const right = Math.max(0, cW - (xMax * scaledW + imgLeft))
+    const bottom = Math.max(0, cH - (yMax * scaledH + imgTop))
+    clipPath = `inset(${top}px ${right}px ${bottom}px ${left}px)`
+  } else if (viewport.shape === 'circle') {
+    const cx = viewport.cx! * scaledW + imgLeft
+    const cy = viewport.cy! * scaledH + imgTop
+    const r = viewport.r! * scaledW
+    clipPath = `circle(${r}px at ${cx}px ${cy}px)`
+  } else if (viewport.shape === 'polygon' && viewport.points) {
+    const pts = viewport.points.map(p => `${p.x * scaledW + imgLeft}px ${p.y * scaledH + imgTop}px`)
+    clipPath = `polygon(${pts.join(', ')})`
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="w-full h-full bg-stone-950 overflow-hidden relative"
+      style={{ clipPath }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={map.imageUrl}
+        alt={map.name}
+        style={{
+          position: 'absolute',
+          width: scaledW,
+          height: scaledH,
+          left: imgLeft,
+          top: imgTop,
+          userSelect: 'none',
+        }}
+        draggable={false}
+        onLoad={e => {
+          const img = e.currentTarget
+          setImgNatural({ w: img.naturalWidth, h: img.naturalHeight })
+        }}
+      />
+    </div>
+  )
+}
+
 function rowToCharacter(row: Record<string, unknown>): Character {
   return {
     id: row.id as string,
@@ -546,6 +1141,10 @@ function rowToCharacter(row: Record<string, unknown>): Character {
     spellSlots: (row.spell_slots as Character['spellSlots']) ?? [],
     conditions: (row.conditions as Character['conditions']) ?? [],
     loot: (row.loot as Character['loot']) ?? [],
+    gold: (row.gold as number) ?? 0,
+    silver: (row.silver as number) ?? 0,
+    copper: (row.copper as number) ?? 0,
+    customCurrency: (row.custom_currency as CustomCurrencyEntry[]) ?? [],
     pushSubscription: (row.push_subscription as Character['pushSubscription']) ?? null,
     isActive: row.is_active as boolean,
     createdAt: new Date(row.created_at as string),

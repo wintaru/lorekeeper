@@ -98,6 +98,19 @@ export class LoadCharacterResponse extends ResponseBase {
   }
 }
 
+export class UpdateCharacterCurrencyResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+
+  constructor(correlationId: string, success: boolean, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.success = success
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
 export class UpdateXpResponse extends ResponseBase {
   readonly correlationId: string
   readonly success: boolean

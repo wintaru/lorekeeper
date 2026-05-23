@@ -5,8 +5,8 @@ import type { ICampaignAccessor } from '@/accessors/campaign/ICampaignAccessor'
 import type { ICharacterAccessor } from '@/accessors/character/ICharacterAccessor'
 import { LoadCampaignByCodeRequest } from '@/accessors/campaign/CampaignRequests'
 import { LoadCampaignByCodeResponse } from '@/accessors/campaign/CampaignResponses'
-import { StoreCharacterRequest } from '@/accessors/character/CharacterRequests'
-import { StoreCharacterResponse } from '@/accessors/character/CharacterResponses'
+import { LoadRosterRequest, StoreCharacterRequest } from '@/accessors/character/CharacterRequests'
+import { LoadRosterResponse, StoreCharacterResponse } from '@/accessors/character/CharacterResponses'
 import { JoinCampaignRequest } from '../CampaignRequests'
 import { JoinCampaignResponse } from '../CampaignResponses'
 
@@ -25,6 +25,20 @@ export class JoinCampaignHandler implements IHandler {
 
     if (!campaignResult.success || !campaignResult.campaign) {
       return new JoinCampaignResponse(req.correlationId, null, null, 'Campaign not found')
+    }
+
+    const rosterResult = (await this.characterAccessor.load(
+      new LoadRosterRequest(campaignResult.campaign.id)
+    )) as LoadRosterResponse
+
+    const existing = rosterResult.characters.find(
+      c =>
+        c.playerName.toLowerCase() === req.playerName.toLowerCase() &&
+        c.characterName.toLowerCase() === req.characterName.toLowerCase()
+    )
+
+    if (existing) {
+      return new JoinCampaignResponse(req.correlationId, existing, campaignResult.campaign)
     }
 
     const characterResult = (await this.characterAccessor.store(

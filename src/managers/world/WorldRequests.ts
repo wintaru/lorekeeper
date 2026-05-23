@@ -1,5 +1,5 @@
 import { RequestBase } from '@/common/RequestBase'
-import type { NpcRelationship, InventoryItem, LootItem } from '@/types'
+import type { NpcRelationship, InventoryItem, LootItem, CustomCurrencyEntry, MapType, MapViewport } from '@/types'
 
 export class AddNpcRequest extends RequestBase {
   constructor(
@@ -76,6 +76,9 @@ export class UpdateInventoryRequest extends RequestBase {
   constructor(
     public readonly campaignId: string,
     public readonly gold: number,
+    public readonly silver: number,
+    public readonly copper: number,
+    public readonly customCurrency: CustomCurrencyEntry[],
     public readonly sharedItems: InventoryItem[],
   ) { super() }
 }
@@ -113,4 +116,34 @@ export class DeleteCustomTableRequest extends RequestBase {
 
 export class GetCustomTablesRequest extends RequestBase {
   constructor(public readonly campaignId: string) { super() }
+}
+
+export class AddMapRequest extends RequestBase {
+  constructor(
+    public readonly campaignId: string,
+    public readonly name: string,
+    public readonly type: MapType,
+    public readonly storagePath: string,
+    public readonly imageUrl: string,
+  ) { super() }
+}
+
+export class GetMapsRequest extends RequestBase {
+  constructor(public readonly campaignId: string) { super() }
+}
+
+export class DeleteMapRequest extends RequestBase {
+  constructor(
+    public readonly mapId: string,
+    public readonly storagePath: string,
+  ) { super() }
+}
+
+export class UpdateMapAccessRequest extends RequestBase {
+  constructor(
+    public readonly campaignId: string,
+    public readonly mapAccessGranted: boolean,
+    public readonly sharedMapIds: string[],
+    public readonly mapViewport: MapViewport | null,
+  ) { super() }
 }
