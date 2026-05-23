@@ -732,26 +732,74 @@ function CombatTab({ campaignId, characters, session, onSessionChange, onRosterR
             {initiativeRequest ? 'Player rolls auto-fill — adjust if needed.' : 'Enter each character\'s roll — higher goes first.'}
           </p>
           <div className="space-y-2">
-            {characters.map(c => (
-              <div key={c.id} className="flex items-center gap-3 bg-stone-900 border border-stone-800 rounded-xl px-4 py-3">
-                <div className="flex-1">
-                  <p className="font-medium text-sm">{c.characterName}</p>
-                  <p className="text-stone-500 text-xs">{c.class} · {c.playerName}</p>
+            {characters.map(c => {
+              const hpPercent = c.maxHp > 0 ? Math.max(0, (c.currentHp / c.maxHp) * 100) : 0
+              const hpColor = hpPercent > 50 ? 'bg-emerald-500' : hpPercent > 25 ? 'bg-yellow-500' : 'bg-red-500'
+              const isSelected = selectedCharId === c.id
+              return (
+                <div key={c.id} className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm">{c.characterName}</p>
+                      <p className="text-stone-500 text-xs">{c.class} · {c.playerName}</p>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <div className="flex-1 h-1 bg-stone-800 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full transition-all ${hpColor}`} style={{ width: `${hpPercent}%` }} />
+                        </div>
+                        <span className="text-xs font-mono text-stone-400 tabular-nums">
+                          {c.currentHp}<span className="text-stone-600">/{c.maxHp}</span>
+                        </span>
+                        <button
+                          onClick={() => { setSelectedCharId(isSelected ? null : c.id); setHpInput('') }}
+                          className={`text-xs px-1.5 py-0.5 rounded transition-colors ${isSelected ? 'text-amber-400' : 'text-stone-600 hover:text-amber-400'}`}
+                        >
+                          ±HP
+                        </button>
+                      </div>
+                    </div>
+                    {initiativeRequest?.rolls[c.id] !== undefined && (
+                      <span className="text-emerald-500 text-xs">✓</span>
+                    )}
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      placeholder="—"
+                      value={initiativeInputs[c.id] ?? ''}
+                      onChange={e => setInitiativeInputs(prev => ({ ...prev, [c.id]: e.target.value }))}
+                      className="w-16 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-center text-sm font-mono focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  {isSelected && (
+                    <div className="px-4 pb-3 border-t border-stone-800/50 pt-2.5">
+                      <p className="text-xs text-stone-500 uppercase tracking-wider mb-2">HP Adjustment</p>
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          min={0}
+                          placeholder="Amount"
+                          value={hpInput}
+                          onChange={e => setHpInput(e.target.value)}
+                          className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber-500"
+                        />
+                        <button
+                          onClick={() => void handleHpChange(c.id, -(parseInt(hpInput, 10) || 0), c.currentHp, c.maxHp)}
+                          className="bg-red-900 hover:bg-red-800 text-red-200 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                        >
+                          Dmg
+                        </button>
+                        <button
+                          onClick={() => void handleHpChange(c.id, parseInt(hpInput, 10) || 0, c.currentHp, c.maxHp)}
+                          className="bg-emerald-900 hover:bg-emerald-800 text-emerald-200 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                        >
+                          Heal
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                {initiativeRequest?.rolls[c.id] !== undefined && (
-                  <span className="text-emerald-500 text-xs">✓</span>
-                )}
-                <input
-                  type="number"
-                  min={1}
-                  max={30}
-                  placeholder="—"
-                  value={initiativeInputs[c.id] ?? ''}
-                  onChange={e => setInitiativeInputs(prev => ({ ...prev, [c.id]: e.target.value }))}
-                  className="w-16 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 text-center text-sm font-mono focus:outline-none focus:border-amber-500"
-                />
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
         <button
