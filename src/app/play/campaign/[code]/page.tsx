@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import type { Character, CustomCurrencyEntry, FateEvent, FateEventType, Whisper, CampaignMap, MapViewport, InitiativeRequest } from '@/types'
+import type { Character, CustomCurrencyEntry, FateEvent, FateEventType, Whisper, CampaignMap, MapViewport, InitiativeRequest, Quest } from '@/types'
 import { SpellsTab } from '@/components/SpellsTab'
 import { RulebookTab } from '@/components/RulebookTab'
 import { LevelUpModal } from '@/components/LevelUpModal'
@@ -84,7 +84,8 @@ export default function PlayerCampaignPage() {
   const [initiativeSubmitting, setInitiativeSubmitting] = useState(false)
   const [levelUpModal, setLevelUpModal] = useState<{ level: number; prevLevel: number } | null>(null)
   const prevLevelRef = useRef<number | null>(null)
-  const [playerTab, setPlayerTab] = useState<'character' | 'map' | 'spells' | 'rulebook'>('character')
+  const [playerTab, setPlayerTab] = useState<'character' | 'map' | 'spells' | 'rulebook' | 'quests'>('character')
+  const [quests, setQuests] = useState<Quest[]>([])
   const [mapAccessGranted, setMapAccessGranted] = useState(false)
   const [sharedMapIds, setSharedMapIds] = useState<string[]>([])
   const [mapViewport, setMapViewport] = useState<MapViewport | null>(null)
@@ -133,6 +134,12 @@ export default function PlayerCampaignPage() {
     if (isInitiativeRequestResponse(data)) setInitiativeRequest(data.request)
   }, [])
 
+  const fetchQuests = useCallback(async (cid: string) => {
+    const res = await fetch(`/api/world/quests?campaignId=${cid}&publicOnly=true`)
+    const data: unknown = await res.json()
+    if (isQuestsResponse(data)) setQuests(data.quests)
+  }, [])
+
   useEffect(() => {
     async function init() {
       const supabase = createClient()
@@ -140,11 +147,11 @@ export default function PlayerCampaignPage() {
       if (!data) { setLoading(false); return }
       const cid = data.id as string
       setCampaignId(cid)
-      await Promise.all([loadCharacter(cid), loadMapAccess(cid), fetchInitiativeRequest(cid)])
+      await Promise.all([loadCharacter(cid), loadMapAccess(cid), fetchInitiativeRequest(cid), fetchQuests(cid)])
       setLoading(false)
     }
     void init()
-  }, [code, loadCharacter, loadMapAccess, fetchInitiativeRequest])
+  }, [code, loadCharacter, loadMapAccess, fetchInitiativeRequest, fetchQuests])
 
   // Load fate log and whispers once character is known
   useEffect(() => {
@@ -238,13 +245,16 @@ export default function PlayerCampaignPage() {
             })
           }
         })
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'quests', filter: `campaign_id=eq.${campaignId}` },
+        () => { void fetchQuests(campaignId) })
       .subscribe()
     return () => {
       void supabase.removeChannel(channel)
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       if (whisperToastTimerRef.current) clearTimeout(whisperToastTimerRef.current)
     }
-  }, [character?.id, campaignId, loadFateLog, loadCharacter, loadMapAccess])
+  }, [character?.id, campaignId, loadFateLog, loadCharacter, loadMapAccess, fetchQuests])
 
   // Register service worker and subscribe to push.
   // Always run on character load so this browser's subscription is synced to the DB —
@@ -426,6 +436,13 @@ export default function PlayerCampaignPage() {
               onClick={() => setPlayerTab('rulebook')}
               className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${playerTab === 'rulebook' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}
             >Rulebook</button>
+            <button
+              onClick={() => setPlayerTab('quests')}
+              className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors relative ${playerTab === 'quests' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}
+            >
+              Quests
+              {quests.length > 0 && <span className="absolute -top-0.5 -right-1 w-2 h-2 bg-amber-500 rounded-full" />}
+            </button>
           </div>
         </div>
       </div>
@@ -454,6 +471,14 @@ export default function PlayerCampaignPage() {
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-sm mx-auto p-4">
             <RulebookTab />
+          </div>
+        </div>
+      )}
+
+      {playerTab === 'quests' && (
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-sm mx-auto p-4">
+            <PlayerQuestsTab quests={quests} />
           </div>
         </div>
       )}
@@ -943,6 +968,112 @@ function isMapsResponse(v: unknown): v is { maps: CampaignMap[]; mapAccessGrante
 
 function isInitiativeRequestResponse(v: unknown): v is { request: InitiativeRequest | null } {
   return typeof v === 'object' && v !== null && 'request' in v
+}
+
+function isQuestsResponse(v: unknown): v is { quests: Quest[] } {
+  return typeof v === 'object' && v !== null && 'quests' in v && Array.isArray((v as Record<string, unknown>).quests)
+}
+
+// ── Player Quests Tab ──────────────────────────────────────────────────────────
+
+const PLAYER_DIFFICULTY_LABELS = ['', 'Trivial', 'Easy', 'Medium', 'Hard', 'Deadly']
+const PLAYER_DIFFICULTY_COLORS = ['', 'bg-emerald-500', 'bg-sky-500', 'bg-amber-500', 'bg-orange-500', 'bg-red-500']
+const PLAYER_DIFFICULTY_TEXT   = ['', 'text-emerald-400', 'text-sky-400', 'text-amber-400', 'text-orange-400', 'text-red-400']
+
+function PlayerQuestsTab({ quests }: { quests: Quest[] }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  if (quests.length === 0) {
+    return (
+      <div className="text-center py-16 space-y-2">
+        <p className="text-stone-500 text-sm">No active quests yet.</p>
+        <p className="text-stone-600 text-xs">Your DM will post quests here.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-stone-500 uppercase tracking-widest">Active Quests ({quests.length})</p>
+      {quests.map(q => {
+        const isExpanded = expandedId === q.id
+        return (
+          <div key={q.id} className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
+            <button
+              onClick={() => setExpandedId(isExpanded ? null : q.id)}
+              className="w-full flex items-start gap-3 px-4 py-3.5 text-left"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-2">
+                  <p className="font-semibold text-sm leading-snug">{q.title}</p>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${q.isOptional ? 'bg-stone-800 text-stone-400' : 'bg-red-950/50 text-red-400 border border-red-800/40'}`}>
+                    {q.isOptional ? 'Optional' : 'Required'}
+                  </span>
+                </div>
+                {/* Difficulty gauge */}
+                <div className="flex items-center gap-1.5">
+                  {[1,2,3,4,5].map(d => (
+                    <div key={d} className={`w-3 h-3 rounded-sm ${d <= q.difficulty ? PLAYER_DIFFICULTY_COLORS[q.difficulty] : 'bg-stone-800'}`} />
+                  ))}
+                  <span className={`text-xs ml-1 ${PLAYER_DIFFICULTY_TEXT[q.difficulty] ?? ''}`}>
+                    {PLAYER_DIFFICULTY_LABELS[q.difficulty] ?? ''}
+                  </span>
+                </div>
+              </div>
+              <span className="text-stone-600 text-xs mt-0.5 shrink-0">{isExpanded ? '▲' : '▼'}</span>
+            </button>
+
+            {isExpanded && (
+              <div className="px-4 pb-4 border-t border-stone-800/50 pt-3 space-y-2.5">
+                {q.questType && (
+                  <div className="flex gap-3">
+                    <span className="text-xs text-stone-500 w-24 shrink-0 pt-0.5">Quest Type</span>
+                    <span className="text-sm text-stone-300">{q.questType}</span>
+                  </div>
+                )}
+                {q.giver && (
+                  <div className="flex gap-3">
+                    <span className="text-xs text-stone-500 w-24 shrink-0 pt-0.5">Quest Giver</span>
+                    <span className="text-sm text-stone-300">{q.giver}</span>
+                  </div>
+                )}
+                {q.objective && (
+                  <div className="flex gap-3">
+                    <span className="text-xs text-stone-500 w-24 shrink-0 pt-0.5">Objective</span>
+                    <span className="text-sm text-stone-200 font-medium">{q.objective}</span>
+                  </div>
+                )}
+                {q.location && (
+                  <div className="flex gap-3">
+                    <span className="text-xs text-stone-500 w-24 shrink-0 pt-0.5">Location</span>
+                    <span className="text-sm text-stone-300">{q.location}</span>
+                  </div>
+                )}
+                {q.complications && (
+                  <div className="flex gap-3">
+                    <span className="text-xs text-stone-500 w-24 shrink-0 pt-0.5">Complication</span>
+                    <span className="text-sm text-stone-400 italic">{q.complications}</span>
+                  </div>
+                )}
+                {q.reward && (
+                  <div className="flex gap-3">
+                    <span className="text-xs text-stone-500 w-24 shrink-0 pt-0.5">Reward</span>
+                    <span className="text-sm text-amber-300 font-medium">{q.reward}</span>
+                  </div>
+                )}
+                {q.description && (
+                  <div className="flex gap-3">
+                    <span className="text-xs text-stone-500 w-24 shrink-0 pt-0.5">Notes</span>
+                    <span className="text-sm text-stone-400 leading-relaxed">{q.description}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 // ── Player Map Tab ─────────────────────────────────────────────────────────────

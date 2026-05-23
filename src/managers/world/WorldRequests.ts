@@ -1,5 +1,5 @@
 import { RequestBase } from '@/common/RequestBase'
-import type { NpcRelationship, InventoryItem, LootItem, CustomCurrencyEntry, MapType, MapViewport } from '@/types'
+import type { NpcRelationship, InventoryItem, LootItem, CustomCurrencyEntry, MapType, MapViewport, QuestStatus } from '@/types'
 
 export class AddNpcRequest extends RequestBase {
   constructor(
@@ -145,5 +145,50 @@ export class UpdateMapAccessRequest extends RequestBase {
     public readonly mapAccessGranted: boolean,
     public readonly sharedMapIds: string[],
     public readonly mapViewport: MapViewport | null,
+  ) { super() }
+}
+
+export class AddQuestRequest extends RequestBase {
+  constructor(
+    public readonly campaignId: string,
+    public readonly title: string,
+    public readonly description: string | null = null,
+    public readonly giver: string | null = null,
+    public readonly objective: string | null = null,
+    public readonly location: string | null = null,
+    public readonly complications: string | null = null,
+    public readonly reward: string | null = null,
+    public readonly difficulty: number = 1,
+    public readonly questType: string | null = null,
+    public readonly isOptional: boolean = true,
+  ) { super() }
+}
+
+export class EditQuestRequest extends RequestBase {
+  constructor(
+    public readonly questId: string,
+    public readonly title: string,
+    public readonly description: string | null,
+    public readonly giver: string | null,
+    public readonly objective: string | null,
+    public readonly location: string | null,
+    public readonly complications: string | null,
+    public readonly reward: string | null,
+    public readonly difficulty: number,
+    public readonly questType: string | null,
+    public readonly isOptional: boolean,
+    public readonly isPublic: boolean,
+    public readonly status: QuestStatus,
+  ) { super() }
+}
+
+export class DeleteQuestRequest extends RequestBase {
+  constructor(public readonly questId: string) { super() }
+}
+
+export class GetQuestsRequest extends RequestBase {
+  constructor(
+    public readonly campaignId: string,
+    public readonly publicOnly: boolean = false,
   ) { super() }
 }

@@ -250,3 +250,23 @@ export interface EncounterDifficulty {
   colorClass: string
   breakdown: EncounterBreakdown
 }
+
+export type QuestStatus = 'draft' | 'active' | 'completed'
+
+export interface Quest {
+  id: string
+  campaignId: string
+  title: string
+  description: string | null
+  giver: string | null
+  objective: string | null
+  location: string | null
+  complications: string | null
+  reward: string | null
+  difficulty: number
+  questType: string | null
+  isOptional: boolean
+  isPublic: boolean
+  status: QuestStatus
+  createdAt: Date
+}

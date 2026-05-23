@@ -1,5 +1,5 @@
 import { ResponseBase } from '@/common/ResponseBase'
-import type { Npc, Location, SessionNote, InventoryItem, CustomTable, CustomCurrencyEntry, CampaignMap } from '@/types'
+import type { Npc, Location, SessionNote, InventoryItem, CustomTable, CustomCurrencyEntry, CampaignMap, Quest } from '@/types'
 
 export class StoreNpcResponse extends ResponseBase {
   readonly correlationId: string
@@ -274,6 +274,49 @@ export class RemoveMapResponse extends ResponseBase {
 }
 
 export class UpdateMapAccessResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+
+  constructor(correlationId: string, success: boolean, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.success = success
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class StoreQuestResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+  readonly quest: Quest | null
+
+  constructor(correlationId: string, quest: Quest | null, errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.quest = quest
+    this.success = quest !== null
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class LoadQuestsResponse extends ResponseBase {
+  readonly correlationId: string
+  readonly success: boolean
+  readonly errorMessage: string | null
+  readonly quests: Quest[]
+
+  constructor(correlationId: string, quests: Quest[], errorMessage?: string) {
+    super()
+    this.correlationId = correlationId
+    this.quests = quests
+    this.success = errorMessage === undefined
+    this.errorMessage = errorMessage ?? null
+  }
+}
+
+export class RemoveQuestResponse extends ResponseBase {
   readonly correlationId: string
   readonly success: boolean
   readonly errorMessage: string | null

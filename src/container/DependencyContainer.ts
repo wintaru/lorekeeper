@@ -161,6 +161,10 @@ import { StoreMapHandler } from '@/accessors/world/handlers/StoreMapHandler'
 import { LoadMapsHandler } from '@/accessors/world/handlers/LoadMapsHandler'
 import { RemoveMapHandler } from '@/accessors/world/handlers/RemoveMapHandler'
 import { UpdateMapAccessHandler as AccessorUpdateMapAccessHandler } from '@/accessors/world/handlers/UpdateMapAccessHandler'
+import { StoreQuestHandler } from '@/accessors/world/handlers/StoreQuestHandler'
+import { UpdateQuestHandler } from '@/accessors/world/handlers/UpdateQuestHandler'
+import { LoadQuestsHandler } from '@/accessors/world/handlers/LoadQuestsHandler'
+import { RemoveQuestHandler } from '@/accessors/world/handlers/RemoveQuestHandler'
 import {
   StoreNpcRequest,
   UpdateNpcRequest,
@@ -184,6 +188,10 @@ import {
   LoadMapsRequest,
   RemoveMapRequest,
   UpdateMapAccessRequest as AccessorUpdateMapAccessRequest,
+  StoreQuestRequest,
+  UpdateQuestRequest,
+  LoadQuestsRequest,
+  RemoveQuestRequest,
 } from '@/accessors/world/WorldRequests'
 
 // Managers — World
@@ -210,6 +218,10 @@ import { AddMapHandler } from '@/managers/world/handlers/AddMapHandler'
 import { GetMapsHandler } from '@/managers/world/handlers/GetMapsHandler'
 import { DeleteMapHandler } from '@/managers/world/handlers/DeleteMapHandler'
 import { UpdateMapAccessHandler } from '@/managers/world/handlers/UpdateMapAccessHandler'
+import { AddQuestHandler } from '@/managers/world/handlers/AddQuestHandler'
+import { EditQuestHandler } from '@/managers/world/handlers/EditQuestHandler'
+import { DeleteQuestHandler } from '@/managers/world/handlers/DeleteQuestHandler'
+import { GetQuestsHandler } from '@/managers/world/handlers/GetQuestsHandler'
 import {
   AddNpcRequest,
   EditNpcRequest,
@@ -233,6 +245,10 @@ import {
   GetMapsRequest,
   DeleteMapRequest,
   UpdateMapAccessRequest,
+  AddQuestRequest,
+  EditQuestRequest,
+  DeleteQuestRequest,
+  GetQuestsRequest,
 } from '@/managers/world/WorldRequests'
 
 import type { ICampaignManager } from '@/managers/campaign/ICampaignManager'
@@ -399,6 +415,8 @@ export function createContainer(): Container {
       .register(UpdateCustomTableRequest, new UpdateCustomTableHandler(db))
       .register(StoreMapRequest, new StoreMapHandler(db))
       .register(AccessorUpdateMapAccessRequest, new AccessorUpdateMapAccessHandler(db))
+      .register(StoreQuestRequest, new StoreQuestHandler(db))
+      .register(UpdateQuestRequest, new UpdateQuestHandler(db))
       .build(),
     new HandlerResolverBuilder()
       .register(LoadNpcsRequest, new LoadNpcsHandler(db))
@@ -407,6 +425,7 @@ export function createContainer(): Container {
       .register(LoadCampaignInventoryRequest, new LoadCampaignInventoryHandler(db))
       .register(LoadCustomTablesRequest, new LoadCustomTablesHandler(db))
       .register(LoadMapsRequest, new LoadMapsHandler(db))
+      .register(LoadQuestsRequest, new LoadQuestsHandler(db))
       .build(),
     new HandlerResolverBuilder()
       .register(RemoveNpcRequest, new RemoveNpcHandler(db))
@@ -414,6 +433,7 @@ export function createContainer(): Container {
       .register(RemoveSessionNoteRequest, new RemoveSessionNoteHandler(db))
       .register(RemoveCustomTableRequest, new RemoveCustomTableHandler(db))
       .register(RemoveMapRequest, new RemoveMapHandler(db))
+      .register(RemoveQuestRequest, new RemoveQuestHandler(db))
       .build(),
   )
 
@@ -435,6 +455,9 @@ export function createContainer(): Container {
       .register(AddMapRequest, new AddMapHandler(worldAccessor))
       .register(DeleteMapRequest, new DeleteMapHandler(worldAccessor))
       .register(UpdateMapAccessRequest, new UpdateMapAccessHandler(worldAccessor))
+      .register(AddQuestRequest, new AddQuestHandler(worldAccessor))
+      .register(EditQuestRequest, new EditQuestHandler(worldAccessor))
+      .register(DeleteQuestRequest, new DeleteQuestHandler(worldAccessor))
       .build(),
     new HandlerResolverBuilder()
       .register(GetNpcsRequest, new GetNpcsHandler(worldAccessor))
@@ -443,6 +466,7 @@ export function createContainer(): Container {
       .register(GetInventoryRequest, new GetInventoryHandler(worldAccessor))
       .register(GetCustomTablesRequest, new GetCustomTablesHandler(worldAccessor))
       .register(GetMapsRequest, new GetMapsHandler(worldAccessor))
+      .register(GetQuestsRequest, new GetQuestsHandler(worldAccessor))
       .build(),
   )
 

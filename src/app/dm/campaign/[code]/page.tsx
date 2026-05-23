@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import type { Character, FateEvent, FateEventType, CombatSession, Condition, DeathSaves, Npc, Location, SessionNote, InventoryItem, LootItem, NpcRelationship, CustomTable, CustomCurrencyEntry, MonsterGroup, Monster, DamageType, ConditionImmunityType, EncounterDifficulty, CampaignMap, MapViewport, MapType, InitiativeRequest } from '@/types'
+import type { Character, FateEvent, FateEventType, CombatSession, Condition, DeathSaves, Npc, Location, SessionNote, InventoryItem, LootItem, NpcRelationship, CustomTable, CustomCurrencyEntry, MonsterGroup, Monster, DamageType, ConditionImmunityType, EncounterDifficulty, CampaignMap, MapViewport, MapType, InitiativeRequest, Quest, QuestStatus } from '@/types'
 import { EncounterEngine } from '@/engines/encounter/EncounterEngine'
 import { EvaluateEncounterRequest } from '@/engines/encounter/EncounterEngineRequests'
 import { EvaluateEncounterResponse } from '@/engines/encounter/EncounterEngineResponses'
@@ -13,7 +13,7 @@ import { SpellsTab } from '@/components/SpellsTab'
 import { RulebookTab } from '@/components/RulebookTab'
 
 type Tab = 'roster' | 'combat' | 'fate' | 'world' | 'encounter' | 'maps' | 'spells' | 'rulebook'
-type WorldTab = 'npcs' | 'locations' | 'inventory' | 'log' | 'tables'
+type WorldTab = 'npcs' | 'locations' | 'inventory' | 'log' | 'tables' | 'quests'
 
 // D&D 5e XP thresholds — index = level - 1
 const XP_THRESHOLDS = [0,300,900,2700,6500,14000,23000,34000,48000,64000,85000,100000,120000,140000,165000,195000,225000,265000,305000,355000]
@@ -1232,6 +1232,7 @@ function WorldTab({ campaignId, characters }: { campaignId: string; characters: 
   const [copper, setCopper] = useState(0)
   const [customCurrency, setCustomCurrency] = useState<CustomCurrencyEntry[]>([])
   const [sharedItems, setSharedItems] = useState<InventoryItem[]>([])
+  const [quests, setQuests] = useState<Quest[]>([])
 
   const fetchNpcs = useCallback(async () => {
     const res = await fetch(`/api/world/npcs?campaignId=${campaignId}`)
@@ -1263,18 +1264,24 @@ function WorldTab({ campaignId, characters }: { campaignId: string; characters: 
     }
   }, [campaignId])
 
-  useEffect(() => {
-    void Promise.all([fetchNpcs(), fetchLocations(), fetchSessionNotes(), fetchInventory()])
-  }, [fetchNpcs, fetchLocations, fetchSessionNotes, fetchInventory])
+  const fetchQuests = useCallback(async () => {
+    const res = await fetch(`/api/world/quests?campaignId=${campaignId}`)
+    const data: unknown = await res.json()
+    if (isQuestsResponse(data)) setQuests(data.quests)
+  }, [campaignId])
 
-  const WORLD_LABELS: Record<WorldTab, string> = { npcs: 'NPCs', locations: 'Locations', inventory: 'Inventory', log: 'Log', tables: 'Tables' }
+  useEffect(() => {
+    void Promise.all([fetchNpcs(), fetchLocations(), fetchSessionNotes(), fetchInventory(), fetchQuests()])
+  }, [fetchNpcs, fetchLocations, fetchSessionNotes, fetchInventory, fetchQuests])
+
+  const WORLD_LABELS: Record<WorldTab, string> = { npcs: 'NPCs', locations: 'Locations', inventory: 'Inventory', log: 'Log', tables: 'Tables', quests: 'Quests' }
 
   return (
     <div className="space-y-4">
       <div className="flex gap-1 bg-stone-900 rounded-lg p-1 overflow-x-auto">
-        {(['npcs', 'locations', 'inventory', 'log', 'tables'] as WorldTab[]).map(t => (
+        {(['npcs', 'locations', 'inventory', 'log', 'tables', 'quests'] as WorldTab[]).map(t => (
           <button key={t} onClick={() => setWorldTab(t)}
-            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${
+            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
               worldTab === t ? 'bg-stone-700 text-stone-100' : 'text-stone-500 hover:text-stone-300'
             }`}>
             {WORLD_LABELS[t]}
@@ -1300,7 +1307,10 @@ function WorldTab({ campaignId, characters }: { campaignId: string; characters: 
         <SessionLogSection campaignId={campaignId} notes={sessionNotes} onRefresh={fetchSessionNotes} />
       )}
       {worldTab === 'tables' && (
-        <TablesSection campaignId={campaignId} />
+        <TablesSection campaignId={campaignId} onQuestSaved={fetchQuests} />
+      )}
+      {worldTab === 'quests' && (
+        <QuestsSection campaignId={campaignId} quests={quests} onRefresh={fetchQuests} />
       )}
     </div>
   )
@@ -2075,8 +2085,11 @@ function buildQuest(): QuestResult {
   }
 }
 
-function QuestGenerator() {
-  const [quest, setQuest] = useState<QuestResult | null>(null)
+type GeneratedQuest = QuestResult & { title: string; difficulty: number; isOptional: boolean; saving: boolean; saved: boolean }
+
+function QuestGenerator({ campaignId, onQuestSaved }: { campaignId: string; onQuestSaved?: () => void }) {
+  const [count, setCount] = useState(1)
+  const [quests, setQuests] = useState<GeneratedQuest[]>([])
 
   const rows: { key: keyof QuestResult; label: string; table: (typeof QUEST_TABLES)[keyof typeof QUEST_TABLES] }[] = [
     { key: 'type',         label: 'Type',      table: QUEST_TABLES.types },
@@ -2087,46 +2100,414 @@ function QuestGenerator() {
     { key: 'reward',       label: 'Reward',    table: QUEST_TABLES.rewards },
   ]
 
+  function generate() {
+    const n = Math.max(1, Math.min(10, count))
+    setQuests(Array.from({ length: n }, () => ({
+      ...buildQuest(),
+      title: '',
+      difficulty: 2,
+      isOptional: true,
+      saving: false,
+      saved: false,
+    })))
+  }
+
+  function updateField<K extends keyof GeneratedQuest>(idx: number, key: K, value: GeneratedQuest[K]) {
+    setQuests(prev => prev.map((q, i) => i === idx ? { ...q, [key]: value } : q))
+  }
+
+  async function saveQuest(idx: number) {
+    const q = quests[idx]
+    const title = q.title.trim() || `${q.type}: ${q.target}`
+    updateField(idx, 'saving', true)
+    await fetch('/api/world/quests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        campaignId,
+        title,
+        giver: q.giver,
+        objective: q.target,
+        location: q.location,
+        complications: q.complication,
+        reward: q.reward,
+        difficulty: q.difficulty,
+        questType: q.type,
+        isOptional: q.isOptional,
+      }),
+    })
+    updateField(idx, 'saving', false)
+    updateField(idx, 'saved', true)
+    onQuestSaved?.()
+  }
+
+  async function saveAll() {
+    const unsaved = quests.map((_, i) => i).filter(i => !quests[i].saved)
+    await Promise.all(unsaved.map(i => saveQuest(i)))
+  }
+
+  const allSaved = quests.length > 0 && quests.every(q => q.saved)
+
   return (
-    <div>
-      <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Quest Generator</p>
-      {quest ? (
-        <div className="bg-stone-900 border border-amber-900/30 rounded-xl p-4 space-y-2.5">
-          {rows.map(({ key, label, table }) => (
-            <div key={key} className="flex items-start gap-2">
-              <span className="text-xs text-stone-500 w-20 shrink-0 pt-0.5">{label}</span>
-              <span className="text-sm text-stone-200 flex-1 leading-snug">{quest[key]}</span>
-              <button
-                onClick={() => setQuest(q => q ? { ...q, [key]: pickRandom(table) } : q)}
-                className="text-stone-600 hover:text-amber-400 text-xs transition-colors shrink-0 pt-0.5"
-                title={`Re-roll ${label}`}
-              >↺</button>
+    <div className="space-y-3">
+      <p className="text-xs text-stone-500 uppercase tracking-widest">Quest Generator</p>
+
+      {quests.length === 0 ? (
+        <div className="flex gap-2 items-center">
+          <div className="flex items-center gap-1.5 bg-stone-900 border border-stone-800 rounded-lg px-3 py-1.5">
+            <span className="text-xs text-stone-500">Generate</span>
+            <input
+              type="number" min={1} max={10} value={count}
+              onChange={e => setCount(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+              className="w-10 bg-transparent text-center text-sm font-mono focus:outline-none text-stone-200"
+            />
+            <span className="text-xs text-stone-500">quest{count !== 1 ? 's' : ''}</span>
+          </div>
+          <button onClick={generate}
+            className="flex-1 border border-dashed border-amber-800/50 rounded-xl py-2 text-sm text-amber-600 hover:text-amber-400 hover:border-amber-700 transition-colors">
+            ✦ Generate
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {quests.map((q, idx) => (
+            <div key={idx} className={`bg-stone-900 border rounded-xl p-4 space-y-2.5 transition-colors ${q.saved ? 'border-emerald-800/50 opacity-70' : 'border-amber-900/30'}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs text-stone-500 font-medium">#{idx + 1}</span>
+                <input
+                  type="text"
+                  placeholder={`${q.type}: ${q.target}`}
+                  value={q.title}
+                  onChange={e => updateField(idx, 'title', e.target.value)}
+                  className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-2 py-1 text-sm focus:outline-none focus:border-amber-500 placeholder:text-stone-600"
+                />
+              </div>
+              {rows.map(({ key, label, table }) => (
+                <div key={key} className="flex items-start gap-2">
+                  <span className="text-xs text-stone-500 w-20 shrink-0 pt-0.5">{label}</span>
+                  <span className="text-sm text-stone-200 flex-1 leading-snug">{q[key]}</span>
+                  {!q.saved && (
+                    <button
+                      onClick={() => updateField(idx, key as keyof QuestResult, pickRandom(table) as never)}
+                      className="text-stone-600 hover:text-amber-400 text-xs transition-colors shrink-0 pt-0.5"
+                      title={`Re-roll ${label}`}
+                    >↺</button>
+                  )}
+                </div>
+              ))}
+              <div className="flex items-center gap-3 pt-2 border-t border-stone-800">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-stone-500">Difficulty</span>
+                  {[1,2,3,4,5].map(d => (
+                    <button key={d} onClick={() => !q.saved && updateField(idx, 'difficulty', d)}
+                      className={`w-4 h-4 rounded-sm transition-colors ${d <= q.difficulty ? 'bg-amber-500' : 'bg-stone-700'}`} />
+                  ))}
+                </div>
+                <button
+                  onClick={() => !q.saved && updateField(idx, 'isOptional', !q.isOptional)}
+                  className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${q.isOptional ? 'border-stone-600 text-stone-500' : 'border-red-700/50 text-red-400 bg-red-950/30'}`}
+                >
+                  {q.isOptional ? 'Optional' : 'Required'}
+                </button>
+                <div className="flex-1" />
+                {q.saved ? (
+                  <span className="text-xs text-emerald-500 font-medium">✓ Saved</span>
+                ) : (
+                  <button
+                    onClick={() => void saveQuest(idx)}
+                    disabled={q.saving}
+                    className="text-xs bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white px-3 py-1 rounded-lg transition-colors"
+                  >
+                    {q.saving ? '…' : 'Save'}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
-          <div className="flex gap-2 pt-2 border-t border-stone-800">
-            <button onClick={() => setQuest(buildQuest())}
-              className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-xs font-medium py-1.5 rounded-lg transition-colors">
-              New Quest
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => void saveAll()}
+              disabled={allSaved}
+              className="flex-1 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-medium py-2 rounded-lg transition-colors"
+            >
+              {allSaved ? '✓ All Saved' : 'Save All to Quests'}
             </button>
-            <button onClick={() => setQuest(null)}
+            <button onClick={() => setQuests([])}
               className="text-stone-500 hover:text-stone-300 text-xs px-3 transition-colors">
               Clear
             </button>
+            <button onClick={generate}
+              className="text-amber-600 hover:text-amber-400 text-xs px-3 transition-colors">
+              Re-roll All
+            </button>
           </div>
         </div>
-      ) : (
-        <button onClick={() => setQuest(buildQuest())}
-          className="w-full border border-dashed border-amber-800/50 rounded-xl py-3 text-sm text-amber-600 hover:text-amber-400 hover:border-amber-700 transition-colors">
-          ✦ Generate Quest
-        </button>
       )}
+    </div>
+  )
+}
+
+// ── Quests Section ────────────────────────────────────────────────────────────
+
+const DIFFICULTY_LABELS = ['', 'Trivial', 'Easy', 'Medium', 'Hard', 'Deadly']
+const DIFFICULTY_COLORS = ['', 'text-emerald-400', 'text-sky-400', 'text-amber-400', 'text-orange-400', 'text-red-400']
+
+function DifficultyGauge({ value, onChange, readonly = false }: { value: number; onChange?: (v: number) => void; readonly?: boolean }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {[1,2,3,4,5].map(d => (
+        <button key={d}
+          onClick={() => !readonly && onChange?.(d)}
+          disabled={readonly}
+          className={`w-3.5 h-3.5 rounded-sm transition-colors ${d <= value
+            ? d <= 2 ? 'bg-emerald-500' : d === 3 ? 'bg-amber-500' : d === 4 ? 'bg-orange-500' : 'bg-red-500'
+            : 'bg-stone-700'}`}
+        />
+      ))}
+      <span className={`text-xs ml-1 ${DIFFICULTY_COLORS[value] ?? ''}`}>{DIFFICULTY_LABELS[value] ?? ''}</span>
+    </div>
+  )
+}
+
+function QuestsSection({ campaignId, quests, onRefresh }: { campaignId: string; quests: Quest[]; onRefresh: () => void }) {
+  const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const emptyForm = { title: '', description: '', giver: '', objective: '', location: '', complications: '', reward: '', difficulty: 2, questType: '', isOptional: true }
+  const [form, setForm] = useState(emptyForm)
+
+  function startEdit(q: Quest) {
+    setEditingId(q.id)
+    setExpandedId(q.id)
+    setForm({
+      title: q.title,
+      description: q.description ?? '',
+      giver: q.giver ?? '',
+      objective: q.objective ?? '',
+      location: q.location ?? '',
+      complications: q.complications ?? '',
+      reward: q.reward ?? '',
+      difficulty: q.difficulty,
+      questType: q.questType ?? '',
+      isOptional: q.isOptional,
+    })
+  }
+
+  async function handleAdd() {
+    if (!form.title.trim()) return
+    await fetch('/api/world/quests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId, ...form, title: form.title.trim() }),
+    })
+    setForm(emptyForm); setShowForm(false); onRefresh()
+  }
+
+  async function handleEdit(q: Quest) {
+    await fetch('/api/world/quests', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questId: q.id, ...form, title: form.title.trim(),
+        isPublic: q.isPublic, status: q.status,
+      }),
+    })
+    setEditingId(null); onRefresh()
+  }
+
+  async function handlePublish(q: Quest) {
+    await fetch('/api/world/quests', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questId: q.id, title: q.title, description: q.description, giver: q.giver,
+        objective: q.objective, location: q.location, complications: q.complications,
+        reward: q.reward, difficulty: q.difficulty, questType: q.questType,
+        isOptional: q.isOptional, isPublic: !q.isPublic,
+        status: !q.isPublic ? 'active' : 'draft',
+      }),
+    })
+    onRefresh()
+  }
+
+  async function handleDelete(id: string) {
+    await fetch(`/api/world/quests?questId=${id}`, { method: 'DELETE' })
+    onRefresh()
+  }
+
+  const fields: { key: keyof typeof emptyForm; label: string; multiline?: boolean }[] = [
+    { key: 'title',         label: 'Title' },
+    { key: 'questType',     label: 'Type' },
+    { key: 'giver',         label: 'Quest Giver' },
+    { key: 'objective',     label: 'Objective' },
+    { key: 'location',      label: 'Location' },
+    { key: 'complications', label: 'Twist / Complication', multiline: true },
+    { key: 'reward',        label: 'Reward' },
+    { key: 'description',   label: 'Description / Notes', multiline: true },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-stone-500 uppercase tracking-widest">Quests ({quests.length})</p>
+        <button onClick={() => { setShowForm(v => !v); setEditingId(null); setForm(emptyForm) }}
+          className="text-xs text-amber-400 hover:text-amber-300 transition-colors">
+          {showForm ? 'Cancel' : '+ New Quest'}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-stone-900 border border-stone-800 rounded-xl p-4 space-y-3">
+          <p className="text-xs text-stone-500 uppercase tracking-wider font-medium">New Quest</p>
+          {fields.map(f => (
+            <div key={f.key}>
+              <p className="text-xs text-stone-500 mb-1">{f.label}</p>
+              {f.multiline ? (
+                <textarea
+                  rows={2}
+                  value={form[f.key] as string}
+                  onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                  className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 resize-none"
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={form[f.key] as string}
+                  onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                  className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
+                />
+              )}
+            </div>
+          ))}
+          <div className="flex items-center gap-4">
+            <div>
+              <p className="text-xs text-stone-500 mb-1.5">Difficulty</p>
+              <DifficultyGauge value={form.difficulty} onChange={v => setForm(p => ({ ...p, difficulty: v }))} />
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-stone-500">Requirement</span>
+              <button
+                onClick={() => setForm(p => ({ ...p, isOptional: !p.isOptional }))}
+                className={`text-xs px-3 py-1 rounded-full border transition-colors ${form.isOptional ? 'border-stone-600 text-stone-400' : 'border-red-700/60 bg-red-950/30 text-red-400'}`}
+              >
+                {form.isOptional ? 'Optional' : 'Required'}
+              </button>
+            </div>
+          </div>
+          <button onClick={() => void handleAdd()}
+            className="w-full bg-amber-700 hover:bg-amber-600 text-white text-sm font-medium py-2 rounded-lg transition-colors">
+            Add Quest
+          </button>
+        </div>
+      )}
+
+      {quests.length === 0 && !showForm && (
+        <p className="text-sm text-stone-600 italic text-center py-6">No quests yet. Create one or generate from Tables.</p>
+      )}
+
+      <div className="space-y-2">
+        {quests.map(q => {
+          const isExpanded = expandedId === q.id
+          const isEditing = editingId === q.id
+          return (
+            <div key={q.id} className={`rounded-xl border transition-colors ${q.isPublic ? 'border-emerald-800/40 bg-emerald-950/10' : 'border-stone-800 bg-stone-900'}`}>
+              <button
+                onClick={() => { setExpandedId(isExpanded ? null : q.id); if (isEditing && isExpanded) setEditingId(null) }}
+                className="w-full flex items-start gap-3 px-4 py-3 text-left"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-medium text-sm">{q.title}</p>
+                    {q.questType && <span className="text-xs text-stone-500">{q.questType}</span>}
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full border ${q.isOptional ? 'border-stone-700 text-stone-500' : 'border-red-800/50 text-red-400 bg-red-950/20'}`}>
+                      {q.isOptional ? 'Optional' : 'Required'}
+                    </span>
+                    {q.isPublic && <span className="text-xs text-emerald-500 font-medium">● Live</span>}
+                  </div>
+                  <DifficultyGauge value={q.difficulty} readonly />
+                </div>
+                <span className="text-stone-600 text-xs mt-0.5">{isExpanded ? '▲' : '▼'}</span>
+              </button>
+
+              {isExpanded && !isEditing && (
+                <div className="px-4 pb-4 border-t border-stone-800/50 pt-3 space-y-2">
+                  {q.giver && <div className="flex gap-2"><span className="text-xs text-stone-500 w-24 shrink-0">Quest Giver</span><span className="text-sm">{q.giver}</span></div>}
+                  {q.objective && <div className="flex gap-2"><span className="text-xs text-stone-500 w-24 shrink-0">Objective</span><span className="text-sm">{q.objective}</span></div>}
+                  {q.location && <div className="flex gap-2"><span className="text-xs text-stone-500 w-24 shrink-0">Location</span><span className="text-sm">{q.location}</span></div>}
+                  {q.complications && <div className="flex gap-2"><span className="text-xs text-stone-500 w-24 shrink-0">Twist</span><span className="text-sm">{q.complications}</span></div>}
+                  {q.reward && <div className="flex gap-2"><span className="text-xs text-stone-500 w-24 shrink-0">Reward</span><span className="text-sm text-amber-300">{q.reward}</span></div>}
+                  {q.description && <div className="flex gap-2"><span className="text-xs text-stone-500 w-24 shrink-0">Notes</span><span className="text-sm text-stone-400 italic">{q.description}</span></div>}
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      onClick={() => void handlePublish(q)}
+                      className={`flex-1 text-xs font-medium py-1.5 rounded-lg transition-colors ${q.isPublic ? 'bg-stone-800 hover:bg-red-900/40 text-stone-400 hover:text-red-400 border border-stone-700' : 'bg-emerald-800 hover:bg-emerald-700 text-white'}`}
+                    >
+                      {q.isPublic ? 'Unpublish from Players' : '↑ Publish to Players'}
+                    </button>
+                    <button onClick={() => startEdit(q)} className="text-xs text-stone-500 hover:text-amber-400 px-3 transition-colors">Edit</button>
+                    <button onClick={() => void handleDelete(q.id)} className="text-xs text-stone-600 hover:text-red-400 px-2 transition-colors">✕</button>
+                  </div>
+                </div>
+              )}
+
+              {isExpanded && isEditing && (
+                <div className="px-4 pb-4 border-t border-stone-800/50 pt-3 space-y-3">
+                  {fields.map(f => (
+                    <div key={f.key}>
+                      <p className="text-xs text-stone-500 mb-1">{f.label}</p>
+                      {f.multiline ? (
+                        <textarea
+                          rows={2}
+                          value={form[f.key] as string}
+                          onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                          className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 resize-none"
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={form[f.key] as string}
+                          onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                          className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
+                        />
+                      )}
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <p className="text-xs text-stone-500 mb-1.5">Difficulty</p>
+                      <DifficultyGauge value={form.difficulty} onChange={v => setForm(p => ({ ...p, difficulty: v }))} />
+                    </div>
+                    <div className="ml-auto flex items-center gap-2">
+                      <button
+                        onClick={() => setForm(p => ({ ...p, isOptional: !p.isOptional }))}
+                        className={`text-xs px-3 py-1 rounded-full border transition-colors ${form.isOptional ? 'border-stone-600 text-stone-400' : 'border-red-700/60 bg-red-950/30 text-red-400'}`}
+                      >
+                        {form.isOptional ? 'Optional' : 'Required'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => void handleEdit(q)}
+                      className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-sm font-medium py-2 rounded-lg transition-colors">
+                      Save Changes
+                    </button>
+                    <button onClick={() => setEditingId(null)}
+                      className="text-stone-500 hover:text-stone-300 text-xs px-3 transition-colors">Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
 
 // ── Tables Section ────────────────────────────────────────────────────────────
 
-function TablesSection({ campaignId }: { campaignId: string }) {
+function TablesSection({ campaignId, onQuestSaved }: { campaignId: string; onQuestSaved?: () => void }) {
   const [customTables, setCustomTables] = useState<CustomTable[]>([])
   const [lastRoll, setLastRoll] = useState<{ table: string; result: string } | null>(null)
   const [showNewForm, setShowNewForm] = useState(false)
@@ -2178,7 +2559,7 @@ function TablesSection({ campaignId }: { campaignId: string }) {
 
   return (
     <div className="space-y-4">
-      <QuestGenerator />
+      <QuestGenerator campaignId={campaignId} onQuestSaved={onQuestSaved} />
       {lastRoll && (
         <div className="bg-amber-950/30 border border-amber-800/40 rounded-xl px-4 py-3 flex items-center justify-between">
           <div>
@@ -2686,6 +3067,12 @@ function isSessionNotesResponse(v: unknown): v is { notes: SessionNote[] } {
 }
 function isInventoryResponse(v: unknown): v is { gold: number; silver?: number; copper?: number; customCurrency?: CustomCurrencyEntry[]; sharedItems: InventoryItem[] } {
   return typeof v === 'object' && v !== null && 'gold' in v && 'sharedItems' in v
+}
+function isQuestsResponse(v: unknown): v is { quests: Quest[] } {
+  return typeof v === 'object' && v !== null && 'quests' in v && Array.isArray((v as Record<string, unknown>).quests)
+}
+function isQuestResponse(v: unknown): v is { quest: Quest } {
+  return typeof v === 'object' && v !== null && 'quest' in v && (v as Record<string, unknown>).quest !== null
 }
 function isRosterResponse(v: unknown): v is { characters: Character[] } {
   return typeof v === 'object' && v !== null && 'characters' in v && Array.isArray((v as Record<string, unknown>).characters)
