@@ -2258,15 +2258,18 @@ const DIFFICULTY_COLORS = ['', 'text-emerald-400', 'text-sky-400', 'text-amber-4
 function DifficultyGauge({ value, onChange, readonly = false }: { value: number; onChange?: (v: number) => void; readonly?: boolean }) {
   return (
     <div className="flex items-center gap-1.5">
-      {[1,2,3,4,5].map(d => (
-        <button key={d}
-          onClick={() => !readonly && onChange?.(d)}
-          disabled={readonly}
-          className={`w-3.5 h-3.5 rounded-sm transition-colors ${d <= value
-            ? d <= 2 ? 'bg-emerald-500' : d === 3 ? 'bg-amber-500' : d === 4 ? 'bg-orange-500' : 'bg-red-500'
-            : 'bg-stone-700'}`}
-        />
-      ))}
+      {[1,2,3,4,5].map(d => {
+        const colorClass = d <= value
+          ? d <= 2 ? 'bg-emerald-500' : d === 3 ? 'bg-amber-500' : d === 4 ? 'bg-orange-500' : 'bg-red-500'
+          : 'bg-stone-700'
+        return readonly ? (
+          <div key={d} className={`w-3.5 h-3.5 rounded-sm ${colorClass}`} />
+        ) : (
+          <button key={d} type="button" onClick={() => onChange?.(d)}
+            className={`w-3.5 h-3.5 rounded-sm transition-colors ${colorClass}`}
+          />
+        )
+      })}
       <span className={`text-xs ml-1 ${DIFFICULTY_COLORS[value] ?? ''}`}>{DIFFICULTY_LABELS[value] ?? ''}</span>
     </div>
   )
